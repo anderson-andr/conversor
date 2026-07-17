@@ -173,7 +173,7 @@ function App() {
 
     setDadosMapeados(dadosMapeadosNovo);
     setStep(3);
-  }, [dadosOriginais, mapeamentoAtual]);
+  }, []);
 
   const voltarMapeamento = useCallback(() => {
     setStep(2);
