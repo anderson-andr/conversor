@@ -22,15 +22,23 @@ function App() {
   const [dadosMapeados, setDadosMapeados] = useState([]);
   const [dadosProcessados, setDadosProcessados] = useState([]);
   const [mapeamentoAtual, setMapeamentoAtual] = useState({});
-  const [configPadrao, setConfigPadrao] = useState({});
+  const [configPadrao, setConfigPadrao] = useState({
+    segmento: 'CL',
+    tabPreco: 'PADRAO',
+    formPgto: 'DP',
+    condPgto: '1',
+    vendedor: 'PATRICKK',
+    tributacao: '1'
+  });
   const [activeTab, setActiveTab] = useState('clientes');
   const [searchTerm, setSearchTerm] = useState('');
-  const [filtroAtivo, setFiltroAtivo] = useState('todos');
-  const [alteracoesDetalhadas, setAlteracoesDetalhadas] = useState([]);
-  const [logAlteracoes, setLogAlteracoes] = useState([]);
   const [processando, setProcessando] = useState(false);
-  const [progresso, setProgresso] = useState(0);
   const fileInputRef = useRef(null);
+  
+  // PAGINAÇÃO
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(100);
+  const [totalPaginas, setTotalPaginas] = useState(1);
 
   // Upload de arquivo com processamento assíncrono para arquivos grandes
   const handleFileUpload = useCallback((file) => {
