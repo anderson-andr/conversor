@@ -1,0 +1,1416 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Importação de Clientes - Com Mapeamento De/Para</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        body { background: #f0f2f5; padding: 20px; color: #333; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        header { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 25px 30px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        header h1 { font-size: 24px; margin-bottom: 5px; }
+        header p { opacity: 0.9; font-size: 14px; }
+
+        .card { background: white; border-radius: 12px; padding: 25px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .card h2 { color: #667eea; font-size: 18px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #f0f2f5; }
+
+        .upload-area { border: 2px dashed #667eea; border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; background: #fafbff; }
+        .upload-area:hover { background: #f0f3ff; border-color: #764ba2; }
+        .upload-area.dragover { background: #e8ecff; border-color: #764ba2; }
+        .upload-icon { font-size: 48px; margin-bottom: 10px; }
+        .upload-area p { color: #666; margin: 5px 0; }
+        input[type="file"] { display: none; }
+
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.3s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-primary:hover { background: #5568d3; transform: translateY(-1px); }
+        .btn-success { background: #10b981; color: white; }
+        .btn-success:hover { background: #059669; transform: translateY(-1px); }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-warning { background: #f59e0b; color: white; }
+        .btn-warning:hover { background: #d97706; }
+        .btn-secondary { background: #6b7280; color: white; }
+        .btn-secondary:hover { background: #4b5563; }
+        .btn-info { background: #3b82f6; color: white; }
+        .btn-info:hover { background: #2563eb; transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 5px; }
+        .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; transition: border 0.2s; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 20px; border-radius: 10px; }
+        .stat-card.success { background: linear-gradient(135deg, #10b981, #059669); }
+        .stat-card.warning { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .stat-card.danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .stat-card.info { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+        .stat-card .label { font-size: 12px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-card .value { font-size: 32px; font-weight: bold; margin-top: 5px; }
+
+        .table-wrapper { overflow-x: auto; max-height: 500px; border-radius: 8px; border: 1px solid #e5e7eb; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        thead { background: #f9fafb; position: sticky; top: 0; z-index: 10; }
+        th { padding: 10px 8px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
+        td { padding: 8px; border-bottom: 1px solid #f3f4f6; }
+        tr:hover { background: #f9fafb; }
+        tr.duplicado { background: #fef3c7; }
+        tr.duplicado:hover { background: #fde68a; }
+        td input, td select { width: 100%; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; }
+        td input:focus, td select:focus { outline: none; border-color: #667eea; }
+
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+        .badge-success { background: #d1fae5; color: #065f46; }
+        .badge-warning { background: #fef3c7; color: #92400e; }
+        .badge-danger { background: #fee2e2; color: #991b1b; }
+        .badge-info { background: #dbeafe; color: #1e40af; }
+
+        .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; align-items: center; }
+        .toolbar input[type="text"] { flex: 1; min-width: 200px; padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 6px; }
+
+        .tabs { display: flex; gap: 5px; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 3px solid transparent; font-weight: 600; color: #6b7280; transition: all 0.2s; }
+        .tab.active { color: #667eea; border-bottom-color: #667eea; }
+        .tab:hover { color: #667eea; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .log-item { padding: 10px; border-left: 4px solid #667eea; background: #f9fafb; margin-bottom: 8px; border-radius: 4px; font-size: 13px; }
+        .log-item.success { border-color: #10b981; }
+        .log-item.warning { border-color: #f59e0b; }
+        .log-item.error { border-color: #ef4444; }
+        .log-item .timestamp { color: #9ca3af; font-size: 11px; }
+
+        .alert { padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        .alert-info { background: #dbeafe; color: #1e40af; border-left: 4px solid #3b82f6; }
+        .alert-warning { background: #fef3c7; color: #92400e; border-left: 4px solid #f59e0b; }
+        .alert-success { background: #d1fae5; color: #065f46; border-left: 4px solid #10b981; }
+
+        .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .hidden { display: none; }
+
+        .mapeamento-header {
+            display: grid;
+            grid-template-columns: 1fr 40px 1fr 80px;
+            gap: 15px;
+            padding: 12px 15px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-radius: 8px 8px 0 0;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .mapeamento-lista {
+            border: 1px solid #e5e7eb;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .mapeamento-item {
+            display: grid;
+            grid-template-columns: 1fr 40px 1fr 80px;
+            gap: 15px;
+            padding: 12px 15px;
+            border-bottom: 1px solid #f3f4f6;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        .mapeamento-item:hover { background: #f9fafb; }
+        .mapeamento-item.mapeado { background: #f0fdf4; }
+        .mapeamento-item.mapeado:hover { background: #dcfce7; }
+        .mapeamento-item.nao-mapeado { background: #fef2f2; }
+        .mapeamento-item.nao-mapeado:hover { background: #fee2e2; }
+        .mapeamento-item.obrigatorio .campo-destino-nome::after {
+            content: " *";
+            color: #ef4444;
+            font-weight: bold;
+        }
+        
+        .campo-destino {
+            font-weight: 600;
+            color: #1f2937;
+            font-size: 13px;
+        }
+        .campo-destino-nome { margin-bottom: 3px; }
+        .campo-destino-tipo {
+            font-size: 11px;
+            color: #6b7280;
+            font-weight: normal;
+        }
+        .seta {
+            text-align: center;
+            color: #667eea;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .campo-origem select {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 13px;
+            background: white;
+            cursor: pointer;
+        }
+        .campo-origem select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+        }
+        .mapeamento-status {
+            text-align: center;
+            font-size: 22px;
+        }
+
+        .mapeamento-resumo {
+            display: flex;
+            gap: 20px;
+            margin-top: 15px;
+            padding: 15px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+        .mapeamento-resumo-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .mapeamento-resumo-item .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .dot-success { background: #10b981; }
+        .dot-danger { background: #ef4444; }
+        .dot-warning { background: #f59e0b; }
+
+        /* Aviso de campo mapeado */
+        .campo-mapeado-aviso {
+            background: #d1fae5;
+            border: 1px solid #10b981;
+            border-radius: 6px;
+            padding: 10px 15px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: #065f46;
+        }
+        .campo-mapeado-aviso strong { font-weight: 700; }
+
+        .preview-table { max-height: 300px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; margin-top: 15px; }
+        .preview-table table { font-size: 11px; }
+        .preview-table th { background: #667eea; color: white; }
+
+        .alteracoes-banner {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+            animation: slideDown 0.3s ease;
+        }
+        @keyframes slideDown {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .alteracoes-banner .info { display: flex; align-items: center; gap: 15px; }
+        .alteracoes-banner .contador {
+            background: white;
+            color: #d97706;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .alteracoes-banner .acoes { display: flex; gap: 10px; }
+        .alteracoes-banner .btn {
+            background: white;
+            color: #d97706;
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+        .alteracoes-banner .btn:hover {
+            background: #fef3c7;
+            transform: translateY(-1px);
+        }
+
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: 1fr; }
+            .mapeamento-header, .mapeamento-item { grid-template-columns: 1fr; gap: 8px; }
+            .seta { transform: rotate(90deg); }
+            header h1 { font-size: 20px; }
+            .alteracoes-banner { flex-direction: column; gap: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📋 Importação de Clientes - Com Mapeamento De/Para</h1>
+            <p>Importe planilhas de qualquer estrutura e mapeie os campos da planilha de origem para os campos do Target3</p>
+        </header>
+
+        <!-- ETAPA 1: Upload -->
+        <div class="card" id="step1">
+            <h2>1️⃣ Importar Planilha de Origem</h2>
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <p><strong>Clique aqui</strong> ou arraste sua planilha</p>
+                <p style="font-size: 12px; color: #999;">Formatos aceitos: .xlsx, .xls (qualquer estrutura)</p>
+                <input type="file" id="fileInput" accept=".xlsx,.xls">
+            </div>
+        </div>
+
+        <!-- ETAPA 2: Mapeamento De/Para -->
+        <div class="card hidden" id="step2">
+            <h2>2️⃣ Mapeamento De/Para</h2>
+            <div class="alert alert-info">
+                ℹ️ A listagem abaixo mostra os <strong>campos da planilha de destino (Target3)</strong>. 
+                Para cada campo, selecione qual <strong>campo da sua planilha importada</strong> corresponde. 
+                Campos mapeados automaticamente não precisarão ser preenchidos manualmente na etapa seguinte.
+            </div>
+            
+            <div class="mapeamento-header">
+                <div>📤 CAMPO DE DESTINO (Target3)</div>
+                <div></div>
+                <div>📥 CAMPO DA PLANILHA IMPORTADA</div>
+                <div style="text-align:center;">STATUS</div>
+            </div>
+            <div class="mapeamento-lista" id="mapeamentoLista"></div>
+
+            <div class="mapeamento-resumo" id="mapeamentoResumo"></div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="btn btn-primary" onclick="aplicarMapeamento()">✅ Aplicar Mapeamento</button>
+                <button class="btn btn-secondary" onclick="mapearAutomaticamente()">🔄 Tentar Mapeamento Automático</button>
+                <button class="btn btn-warning" onclick="resetarMapeamento()">↩️ Resetar</button>
+            </div>
+        </div>
+
+        <!-- ETAPA 3: Preview dos Dados -->
+        <div class="card hidden" id="step3">
+            <h2>3️⃣ Preview dos Dados Mapeados</h2>
+            <div class="alert alert-success">
+                ✅ Mapeamento aplicado com sucesso! <strong id="totalRegistros">0</strong> registros detectados.
+            </div>
+            <div class="preview-table" id="previewTable"></div>
+            <div style="margin-top: 20px;">
+                <button class="btn btn-success" onclick="processarDados()">🚀 Processar Dados</button>
+                <button class="btn btn-secondary" onclick="voltarMapeamento()">↩️ Voltar ao Mapeamento</button>
+            </div>
+        </div>
+
+        <!-- ETAPA 4: Configuração Padrão -->
+        <div class="card hidden" id="step4">
+            <h2>4️⃣ Configurar Valores Padrão</h2>
+            <div class="alert alert-info">
+                ℹ️ Preencha apenas os campos que <strong>NÃO vieram da planilha de origem</strong>. 
+                Campos mapeados automaticamente estão ocultos (você pode editar individualmente depois).
+            </div>
+            
+            <div id="camposMapeadosAviso"></div>
+            
+            <div class="grid" id="gridConfigPadrao">
+                <!-- Os campos serão inseridos dinamicamente -->
+            </div>
+            <div style="margin-top: 20px;">
+                <button class="btn btn-primary" onclick="processarPlanilha()">🔄 Processar Dados</button>
+            </div>
+        </div>
+
+        <!-- ETAPA 5: Estatísticas -->
+        <div class="card hidden" id="step5">
+            <h2>5️⃣ Resumo do Processamento</h2>
+            <div class="stats" id="statsContainer"></div>
+            <div class="actions">
+                <button class="btn btn-success" onclick="exportarExcel()">💾 Exportar para Excel</button>
+                <button class="btn btn-warning" onclick="exportarLog()">📄 Exportar Log</button>
+                <button class="btn btn-danger" onclick="exportarDuplicados()">⚠️ Exportar Duplicados</button>
+                <button class="btn btn-secondary" onclick="resetar()">🔄 Novo Processamento</button>
+            </div>
+        </div>
+
+        <!-- ETAPA 6: Dados -->
+        <div class="card hidden" id="step6">
+            <h2>6️⃣ Dados Processados</h2>
+            
+            <div class="alteracoes-banner hidden" id="alteracoesBanner">
+                <div class="info">
+                    <span style="font-size: 24px;">✏️</span>
+                    <div>
+                        <strong>Você tem alterações pendentes!</strong>
+                        <div style="font-size: 13px; opacity: 0.95;">
+                            <span id="contadorAlteracoes">0</span> campo(s) alterado(s) em 
+                            <span id="contadorLinhas">0</span> registro(s)
+                        </div>
+                    </div>
+                    <div class="contador" id="badgeAlteracoes">0</div>
+                </div>
+                <div class="acoes">
+                    <button class="btn" onclick="exportarDadosAtualizados()">💾 Gerar Novo Arquivo</button>
+                    <button class="btn" onclick="exportarApenasAlteracoes()">📋 Só Alterações</button>
+                    <button class="btn" onclick="visualizarAlteracoes()">👁️ Ver Log</button>
+                    <button class="btn" onclick="descartarAlteracoes()">↩️ Desfazer</button>
+                </div>
+            </div>
+
+            <div class="tabs">
+                <div class="tab active" onclick="mudarTab('clientes')">Clientes (<span id="countClientes">0</span>)</div>
+                <div class="tab" onclick="mudarTab('duplicados')">Duplicados (<span id="countDuplicados">0</span>)</div>
+                <div class="tab" onclick="mudarTab('log')">Log de Alterações</div>
+            </div>
+
+            <div id="tab-clientes" class="tab-content active">
+                <div class="toolbar">
+                    <input type="text" id="searchInput" placeholder="🔍 Buscar por código, nome, CNPJ..." oninput="filtrarTabela()">
+                    <select id="filterAtivo" onchange="filtrarTabela()">
+                        <option value="">Todos Status</option>
+                        <option value="1">Ativos</option>
+                        <option value="0">Inativos</option>
+                        <option value="alterado">🔸 Somente Alterados</option>
+                    </select>
+                </div>
+                <div class="table-wrapper">
+                    <table id="tabelaClientes">
+                        <thead id="theadClientes"></thead>
+                        <tbody id="tbodyClientes"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-duplicados" class="tab-content">
+                <div class="alert alert-warning">
+                    ⚠️ Registros duplicados detectados e removidos automaticamente. Mantido o registro com menor código.
+                </div>
+                <div class="table-wrapper">
+                    <table id="tabelaDuplicados">
+                        <thead id="theadDuplicados"></thead>
+                        <tbody id="tbodyDuplicados"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-log" class="tab-content">
+                <div id="logContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // DEFINIÇÃO DOS CAMPOS DA PLANILHA DE DESTINO
+        // ============================================
+        const camposDestino = [
+            { nome: 'Cód Cliente', obrigatorio: true, tipo: 'Numérico', dica: 'Código único do cliente' },
+            { nome: 'Nome', obrigatorio: true, tipo: 'Texto (máx 60)', dica: 'Razão social ou nome completo' },
+            { nome: 'Nome Fantasia', obrigatorio: true, tipo: 'Texto (máx 20)', dica: 'Nome fantasia' },
+            { nome: 'Tipo de Pessoa', obrigatorio: true, tipo: 'Texto (1)', dica: 'F = Física | J = Jurídica' },
+            { nome: 'CNPJ/CPF', obrigatorio: true, tipo: 'Texto (máx 14)', dica: 'Apenas dígitos' },
+            { nome: 'Tipo de Inscrição', obrigatorio: true, tipo: 'Texto (1)', dica: 'E = Estadual | M = Municipal | I = Isento' },
+            { nome: 'Inscrição', obrigatorio: false, tipo: 'Texto (máx 20)', dica: 'IE ou RG' },
+            { nome: 'Segmento', obrigatorio: true, tipo: 'Texto (máx 4)', dica: 'Deve estar cadastrado no ERP' },
+            { nome: 'Cód Grupo de Cliente', obrigatorio: false, tipo: 'Texto (máx 10)', dica: 'Opcional' },
+            { nome: 'Data de Cadastro', obrigatorio: true, tipo: 'Data (dd/mm/aaaa)', dica: 'Formato dd/mm/aaaa' },
+            { nome: 'Data da 1ª compra', obrigatorio: false, tipo: 'Data (dd/mm/aaaa)', dica: 'Formato dd/mm/aaaa' },
+            { nome: 'Data Ult Compra', obrigatorio: false, tipo: 'Data (dd/mm/aaaa)', dica: 'Formato dd/mm/aaaa' },
+            { nome: 'Limite de Crédito', obrigatorio: false, tipo: 'Numérico', dica: 'Valor do limite' },
+            { nome: 'Cód Tab Preço', obrigatorio: true, tipo: 'Texto (máx 8)', dica: 'Tabela de preços' },
+            { nome: 'Form De Pgto', obrigatorio: true, tipo: 'Texto (máx 2)', dica: 'DP / CA / DC' },
+            { nome: 'Condição De Pgto', obrigatorio: false, tipo: 'Numérico', dica: 'Código da condição' },
+            { nome: 'Email', obrigatorio: false, tipo: 'Texto (máx 80)', dica: 'E-mail principal' },
+            { nome: 'Site', obrigatorio: false, tipo: 'Texto (máx 50)', dica: 'Website' },
+            { nome: 'Cód Rota', obrigatorio: false, tipo: 'Texto (máx 8)', dica: 'Código da rota' },
+            { nome: 'Banco', obrigatorio: false, tipo: 'Numérico', dica: 'Código do banco' },
+            { nome: 'Agência', obrigatorio: false, tipo: 'Texto (máx 8)', dica: 'Código da agência' },
+            { nome: 'Conta', obrigatorio: false, tipo: 'Texto (máx 10)', dica: 'Número da conta' },
+            { nome: 'Cód Tipo tributação', obrigatorio: true, tipo: 'Numérico', dica: 'Tipo de tributação' },
+            { nome: 'Endereco', obrigatorio: true, tipo: 'Texto (máx 60)', dica: 'Logradouro' },
+            { nome: 'Bairro', obrigatorio: true, tipo: 'Texto (máx 60)', dica: 'Bairro' },
+            { nome: 'Municipio', obrigatorio: true, tipo: 'Texto (máx 60)', dica: 'Cidade' },
+            { nome: 'Cep', obrigatorio: true, tipo: 'Numérico', dica: 'Apenas dígitos' },
+            { nome: 'Estado', obrigatorio: true, tipo: 'Texto (2)', dica: 'Sigla UF' },
+            { nome: 'Numero', obrigatorio: true, tipo: 'Texto (máx 15)', dica: 'Número do endereço' },
+            { nome: 'Complemento', obrigatorio: false, tipo: 'Texto (máx 60)', dica: 'Complemento' },
+            { nome: 'DDD', obrigatorio: false, tipo: 'Texto (máx 4)', dica: 'DDD do telefone' },
+            { nome: 'Numero Tel', obrigatorio: false, tipo: 'Numérico', dica: 'Número do telefone' },
+            { nome: 'Nome Contato', obrigatorio: false, tipo: 'Texto (máx 30)', dica: 'Nome do contato' },
+            { nome: 'Cargo', obrigatorio: false, tipo: 'Texto (máx 20)', dica: 'Cargo do contato' },
+            { nome: 'Email Contato', obrigatorio: false, tipo: 'Texto (máx 50)', dica: 'E-mail do contato' },
+            { nome: 'DDD_2', obrigatorio: false, tipo: 'Texto (máx 4)', dica: 'DDD do celular' },
+            { nome: 'Numero_2', obrigatorio: false, tipo: 'Numérico', dica: 'Número do celular' },
+            { nome: 'Cód Vendedor', obrigatorio: true, tipo: 'Texto (máx 8)', dica: 'Código do vendedor' },
+            { nome: 'Ativo', obrigatorio: true, tipo: 'Booleano (0/1)', dica: '1 = Ativo | 0 = Inativo' }
+        ];
+
+        // ============================================
+        // CONFIGURAÇÃO DE CAMPOS QUE PODEM SER MAPEADOS
+        // Estes campos, quando mapeados, não precisam de valor padrão
+        // ============================================
+        const camposConfiguraveis = [
+            { campo: 'Segmento', default: 'CL', label: 'Segmento *', maxlength: 4 },
+            { campo: 'Cód Tab Preço', default: 'PADRAO', label: 'Cód Tab Preço *', maxlength: 8 },
+            { campo: 'Form De Pgto', default: 'DP', label: 'Forma de Pagamento *', maxlength: 2, tipo: 'select', 
+              opcoes: [
+                  { valor: 'DP', texto: 'DP - Boleto' },
+                  { valor: 'CA', texto: 'CA - Carteira' },
+                  { valor: 'DC', texto: 'DC - Depósito' }
+              ]
+            },
+            { campo: 'Condição De Pgto', default: '1', label: 'Condição de Pagamento', maxlength: 10 },
+            { campo: 'Cód Vendedor', default: 'PATRICKK', label: 'Cód Vendedor *', maxlength: 8 },
+            { campo: 'Cód Tipo tributação', default: '1', label: 'Cód Tipo Tributação *', maxlength: 5 },
+            { campo: 'Cód Grupo de Cliente', default: '', label: 'Cód Grupo de Cliente', maxlength: 10 },
+            { campo: 'Cód Rota', default: '', label: 'Cód Rota', maxlength: 8 },
+            { campo: 'Banco', default: '', label: 'Banco', maxlength: 10 },
+            { campo: 'Agência', default: '', label: 'Agência', maxlength: 8 },
+            { campo: 'Conta', default: '', label: 'Conta', maxlength: 10 },
+            { campo: 'Cargo', default: '', label: 'Cargo Contato', maxlength: 20 }
+        ];
+
+        // Regras de mapeamento automático
+        const regrasMapeamento = {
+            'Cód Cliente': ['código', 'codigo', 'cod', 'cod_cliente', 'id', 'cód cliente', 'cod. cliente'],
+            'Nome': ['nome', 'razão social', 'razao social', 'nome cliente', 'razão'],
+            'Nome Fantasia': ['fantasia', 'nome fantasia', 'nome comercial'],
+            'Tipo de Pessoa': ['tipo pessoa', 'tipo de pessoa', 'tipo_cliente', 'tipo'],
+            'CNPJ/CPF': ['cnpj', 'cpf', 'cnpj/cpf', 'documento', 'cnpj / cpf', 'cnpj_cpf'],
+            'Inscrição': ['ie', 'rg', 'inscrição', 'ie / rg', 'ie/rg', 'inscricao'],
+            'Segmento': ['segmento', 'seg'],
+            'Data de Cadastro': ['cliente desde', 'data cadastro', 'data de cadastro', 'dt cadastro'],
+            'Email': ['e-mail', 'email', 'mail', 'e-mail para envio nfe'],
+            'Site': ['web site', 'website', 'site'],
+            'Endereco': ['endereço', 'endereco', 'logradouro', 'rua', 'av', 'avenida'],
+            'Bairro': ['bairro'],
+            'Municipio': ['cidade', 'município', 'municipio'],
+            'Cep': ['cep'],
+            'Estado': ['uf', 'estado', 'sigla'],
+            'Numero': ['número', 'numero', 'num', 'nº'],
+            'Complemento': ['complemento'],
+            'DDD': ['fone', 'telefone', 'tel', 'phone'],
+            'Numero Tel': ['fone', 'telefone', 'tel'],
+            'DDD_2': ['celular', 'cel', 'mobile'],
+            'Numero_2': ['celular', 'cel'],
+            'Nome Contato': ['contato', 'contatos', 'responsável', 'responsavel'],
+            'Cód Vendedor': ['vendedor', 'representante', 'cod vendedor', 'cód vendedor', 'cod. vendedor'],
+            'Condição De Pgto': ['condição de pagamento', 'condicao de pagamento', 'prazo pagamento', 'cond pgto'],
+            'Limite de Crédito': ['limite de crédito', 'limite de credito', 'limite'],
+            'Ativo': ['situação', 'situacao', 'status', 'ativo'],
+            'Cód Tipo tributação': ['regime tributário', 'regime tributario', 'tributacao']
+        };
+
+        // Variáveis globais
+        let dadosOriginais = [];
+        let camposOrigem = [];
+        let dadosMapeados = [];
+        let dadosProcessados = [];
+        let dadosOriginaisSnapshot = [];
+        let duplicados = [];
+        let logAlteracoes = [];
+        let alteracoesDetalhadas = [];
+        let registrosSemCodigo = 0;
+        let mapeamentoAtual = {}; // destino → origem
+
+        // Upload
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                lerArquivo(e.dataTransfer.files[0]);
+            }
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) lerArquivo(e.target.files[0]);
+        });
+
+        function lerArquivo(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    dadosOriginais = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+                    
+                    if (dadosOriginais.length === 0) {
+                        alert('A planilha está vazia!');
+                        return;
+                    }
+                    
+                    camposOrigem = Object.keys(dadosOriginais[0]);
+                    
+                    addLog(`📁 Arquivo "${file.name}" carregado com ${dadosOriginais.length} registros`, 'success');
+                    
+                    mostrarMapeamento();
+                    
+                } catch (err) {
+                    alert('Erro ao ler arquivo: ' + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ============================================
+        // MAPEAMENTO
+        // ============================================
+        function mostrarMapeamento() {
+            const lista = document.getElementById('mapeamentoLista');
+            lista.innerHTML = '';
+            
+            mapeamentoAtual = {};
+            
+            camposDestino.forEach(campo => {
+                const origemDetectada = detectarMapeamentoAutomatico(campo.nome);
+                mapeamentoAtual[campo.nome] = origemDetectada;
+                
+                const item = document.createElement('div');
+                item.className = `mapeamento-item ${origemDetectada ? 'mapeado' : 'nao-mapeado'} ${campo.obrigatorio ? 'obrigatorio' : ''}`;
+                item.dataset.campoDestino = campo.nome;
+                
+                item.innerHTML = `
+                    <div class="campo-destino">
+                        <div class="campo-destino-nome">${campo.nome}</div>
+                        <div class="campo-destino-tipo">${campo.tipo}${campo.obrigatorio ? ' • Obrigatório' : ' • Opcional'}</div>
+                    </div>
+                    <div class="seta">→</div>
+                    <div class="campo-origem">
+                        <select onchange="atualizarMapeamento('${campo.nome.replace(/'/g, "\\'")}', this.value)">
+                            <option value="">-- Não mapear --</option>
+                            ${camposOrigem.map(campoO => 
+                                `<option value="${campoO}" ${campoO === origemDetectada ? 'selected' : ''}>${campoO}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="mapeamento-status">${origemDetectada ? '✅' : '⚠️'}</div>
+                `;
+                lista.appendChild(item);
+            });
+            
+            atualizarResumoMapeamento();
+            document.getElementById('step2').classList.remove('hidden');
+        }
+
+        function detectarMapeamentoAutomatico(campoDestino) {
+            const regras = regrasMapeamento[campoDestino];
+            if (!regras) return '';
+            
+            for (const regra of regras) {
+                const regraLower = regra.toLowerCase();
+                for (const campoO of camposOrigem) {
+                    const campoLower = campoO.toLowerCase().trim();
+                    if (campoLower === regraLower || 
+                        campoLower.includes(regraLower) || 
+                        regraLower.includes(campoLower)) {
+                        return campoO;
+                    }
+                }
+            }
+            return '';
+        }
+
+        function atualizarMapeamento(campoDestino, campoOrigem) {
+            mapeamentoAtual[campoDestino] = campoOrigem;
+            
+            const items = document.querySelectorAll('.mapeamento-item');
+            items.forEach(item => {
+                if (item.dataset.campoDestino === campoDestino) {
+                    item.className = `mapeamento-item ${campoOrigem ? 'mapeado' : 'nao-mapeado'} ${item.classList.contains('obrigatorio') ? 'obrigatorio' : ''}`;
+                    item.querySelector('.mapeamento-status').textContent = campoOrigem ? '✅' : '⚠️';
+                }
+            });
+            
+            atualizarResumoMapeamento();
+        }
+
+        function atualizarResumoMapeamento() {
+            const total = camposDestino.length;
+            const mapeados = Object.values(mapeamentoAtual).filter(v => v).length;
+            const obrigatorios = camposDestino.filter(c => c.obrigatorio).length;
+            const obrigatoriosMapeados = camposDestino.filter(c => c.obrigatorio && mapeamentoAtual[c.nome]).length;
+            const naoMapeados = total - mapeados;
+            
+            const resumo = document.getElementById('mapeamentoResumo');
+            resumo.innerHTML = `
+                <div class="mapeamento-resumo-item">
+                    <div class="dot dot-success"></div>
+                    <span><strong>${mapeados}</strong> de ${total} campos mapeados</span>
+                </div>
+                <div class="mapeamento-resumo-item">
+                    <div class="dot dot-danger"></div>
+                    <span><strong>${naoMapeados}</strong> não mapeados</span>
+                </div>
+                <div class="mapeamento-resumo-item">
+                    <div class="dot dot-warning"></div>
+                    <span><strong>${obrigatoriosMapeados}</strong> de ${obrigatorios} obrigatórios mapeados</span>
+                </div>
+            `;
+        }
+
+        function mapearAutomaticamente() {
+            camposDestino.forEach(campo => {
+                const origemDetectada = detectarMapeamentoAutomatico(campo.nome);
+                if (origemDetectada) {
+                    mapeamentoAtual[campo.nome] = origemDetectada;
+                }
+            });
+            mostrarMapeamento();
+            addLog('🔄 Mapeamento automático executado', 'info');
+        }
+
+        function resetarMapeamento() {
+            mostrarMapeamento();
+            addLog('↩️ Mapeamento resetado', 'info');
+        }
+
+        function aplicarMapeamento() {
+            const obrigatoriosNaoMapeados = camposDestino.filter(
+                c => c.obrigatorio && !mapeamentoAtual[c.nome]
+            );
+            
+            if (obrigatoriosNaoMapeados.length > 0) {
+                const continuar = confirm(
+                    `⚠️ Atenção!\n\n` +
+                    `Os seguintes campos obrigatórios não estão mapeados:\n\n` +
+                    obrigatoriosNaoMapeados.map(c => `• ${c.nome}`).join('\n') +
+                    `\n\nDeseja continuar mesmo assim?`
+                );
+                if (!continuar) return;
+            }
+            
+            dadosMapeados = dadosOriginais.map(row => {
+                const newRow = {};
+                for (const [destino, origem] of Object.entries(mapeamentoAtual)) {
+                    if (origem) {
+                        newRow[destino] = row[origem];
+                    } else {
+                        newRow[destino] = '';
+                    }
+                }
+                return newRow;
+            });
+            
+            addLog(`✅ Mapeamento aplicado: ${Object.values(mapeamentoAtual).filter(v => v).length} campos mapeados`, 'success');
+            
+            mostrarPreview();
+            renderizarConfigPadrao(); // Renderiza a etapa 4 com os campos mapeados ocultos
+            
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step3').classList.remove('hidden');
+        }
+
+        function voltarMapeamento() {
+            document.getElementById('step3').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+        }
+
+        function mostrarPreview() {
+            document.getElementById('totalRegistros').textContent = dadosMapeados.length;
+            
+            const preview = document.getElementById('previewTable');
+            if (dadosMapeados.length === 0) {
+                preview.innerHTML = '<p style="padding: 20px; text-align: center;">Nenhum dado mapeado</p>';
+                return;
+            }
+            
+            const campos = Object.keys(dadosMapeados[0]).filter(c => dadosMapeados[0][c] !== '');
+            const linhasPreview = dadosMapeados.slice(0, 10);
+            
+            preview.innerHTML = `
+                <table>
+                    <thead>
+                        <tr>${campos.map(c => `<th>${c}</th>`).join('')}</tr>
+                    </thead>
+                    <tbody>
+                        ${linhasPreview.map(row => 
+                            `<tr>${campos.map(c => `<td>${row[c] || ''}</td>`).join('')}</tr>`
+                        ).join('')}
+                    </tbody>
+                </table>
+                ${dadosMapeados.length > 10 ? `<p style="padding: 10px; text-align: center; color: #666;">Mostrando 10 de ${dadosMapeados.length} registros</p>` : ''}
+            `;
+        }
+
+        // ============================================
+        // RENDERIZAÇÃO DINÂMICA DA ETAPA 4
+        // Só mostra campos que NÃO foram mapeados
+        // ============================================
+        function renderizarConfigPadrao() {
+            const grid = document.getElementById('gridConfigPadrao');
+            const aviso = document.getElementById('camposMapeadosAviso');
+            grid.innerHTML = '';
+            aviso.innerHTML = '';
+            
+            const camposMapeados = [];
+            const camposNaoMapeados = [];
+            
+            camposConfiguraveis.forEach(cfg => {
+                if (mapeamentoAtual[cfg.campo]) {
+                    camposMapeados.push({
+                        campo: cfg.campo,
+                        origem: mapeamentoAtual[cfg.campo]
+                    });
+                } else {
+                    camposNaoMapeados.push(cfg);
+                }
+            });
+            
+            // Aviso de campos mapeados
+            if (camposMapeados.length > 0) {
+                aviso.innerHTML = `
+                    <div class="campo-mapeado-aviso">
+                        <span style="font-size: 20px;">✅</span>
+                        <div>
+                            <strong>${camposMapeados.length} campo(s) já mapeado(s) da planilha:</strong><br>
+                            ${camposMapeados.map(c => 
+                                `<span class="badge badge-success">${c.campo}</span> ← <em>${c.origem}</em>`
+                            ).join(' &nbsp;|&nbsp; ')}
+                            <br><small>Você pode editar estes valores individualmente na tabela de dados depois.</small>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Campos que precisam de valor padrão
+            if (camposNaoMapeados.length === 0) {
+                grid.innerHTML = `
+                    <div class="alert alert-success" style="grid-column: 1 / -1;">
+                        🎉 <strong>Todos os campos configuráveis foram mapeados da planilha!</strong><br>
+                        Você pode prosseguir diretamente para o processamento.
+                    </div>
+                `;
+            } else {
+                camposNaoMapeados.forEach(cfg => {
+                    const div = document.createElement('div');
+                    div.className = 'form-group';
+                    
+                    let inputHtml = '';
+                    if (cfg.tipo === 'select' && cfg.opcoes) {
+                        inputHtml = `
+                            <select id="default_${cfg.campo.replace(/\s/g, '_')}">
+                                ${cfg.opcoes.map(op => 
+                                    `<option value="${op.valor}" ${op.valor === cfg.default ? 'selected' : ''}>${op.texto}</option>`
+                                ).join('')}
+                            </select>
+                        `;
+                    } else {
+                        inputHtml = `<input type="text" id="default_${cfg.campo.replace(/\s/g, '_')}" value="${cfg.default}" maxlength="${cfg.maxlength || 50}">`;
+                    }
+                    
+                    div.innerHTML = `
+                        <label>${cfg.label}</label>
+                        ${inputHtml}
+                    `;
+                    grid.appendChild(div);
+                });
+            }
+        }
+
+        function processarDados() {
+            document.getElementById('step3').classList.add('hidden');
+            document.getElementById('step4').classList.remove('hidden');
+        }
+
+        // ============================================
+        // FUNÇÕES DE PROCESSAMENTO
+        // ============================================
+        function apenasDigitos(v) { return String(v || '').replace(/\D/g, ''); }
+        
+        function limparCnpjCpf(v) {
+            const d = apenasDigitos(v);
+            return d.length === 11 || d.length === 14 ? d : '';
+        }
+        
+        function limparCep(v) { return apenasDigitos(v).slice(0, 8); }
+        
+        function separarTelefone(tel) {
+            const d = apenasDigitos(tel);
+            if (d.length >= 10) return { ddd: d.slice(0, 2), num: d.slice(2) };
+            if (d.length >= 8) return { ddd: '', num: d };
+            return { ddd: '', num: d };
+        }
+        
+        function mapearTipoPessoa(v) {
+            const s = String(v || '').toUpperCase();
+            if (s.includes('FÍSICA') || s.includes('FISICA')) return 'F';
+            if (s.includes('JUR')) return 'J';
+            return 'J';
+        }
+        
+        function mapearTipoInscricao(row) {
+            const ie = String(row['Inscrição'] || '').trim();
+            const ieUpper = ie.toUpperCase();
+            if (!ie || ieUpper === 'ISENTO' || ie === '0') return 'I';
+            return 'E';
+        }
+        
+        function parseData(v) {
+            if (!v) return '';
+            if (v instanceof Date) {
+                if (v.getFullYear() < 1970) return '';
+                return `${String(v.getDate()).padStart(2,'0')}/${String(v.getMonth()+1).padStart(2,'0')}/${v.getFullYear()}`;
+            }
+            const s = String(v).trim();
+            const match = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+            if (match) {
+                let [, d, m, y] = match;
+                let ano = parseInt(y);
+                if (ano < 100) ano += 2000;
+                if (ano < 1970) return '';
+                return `${d.padStart(2,'0')}/${m.padStart(2,'0')}/${ano}`;
+            }
+            return '';
+        }
+        
+        function mapearAtivo(v) {
+            const s = String(v || '').toLowerCase();
+            return s === 'ativo' || s === '1' || s === 'true' ? 1 : 0;
+        }
+
+        function normalizarTexto(t) {
+            return String(t || '').toUpperCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/\s+/g, ' ').trim();
+        }
+
+        // ============================================
+        // PROCESSAMENTO DA PLANILHA
+        // ============================================
+        function processarPlanilha() {
+            dadosProcessados = [];
+            duplicados = [];
+            logAlteracoes = [];
+            alteracoesDetalhadas = [];
+            registrosSemCodigo = 0;
+            
+            // Coleta valores padrão apenas dos campos NÃO mapeados
+            const config = {};
+            camposConfiguraveis.forEach(cfg => {
+                const id = `default_${cfg.campo.replace(/\s/g, '_')}`;
+                const el = document.getElementById(id);
+                if (el) {
+                    config[cfg.campo] = el.value;
+                }
+            });
+            
+            // Validar código
+            const dadosComCodigo = dadosMapeados.filter(row => {
+                const codigo = String(row['Cód Cliente'] || '').trim();
+                if (!codigo || codigo === '' || codigo === 'nan' || codigo === 'None') {
+                    registrosSemCodigo++;
+                    addLog(`❌ Registro sem código excluído: ${row['Nome'] || 'Sem nome'}`, 'error');
+                    return false;
+                }
+                return true;
+            });
+            
+            addLog(`🔍 ${registrosSemCodigo} registros sem código foram excluídos`, 'warning');
+            
+            const ordenados = [...dadosComCodigo].sort((a, b) => {
+                const ca = String(a['Cód Cliente'] || '').padStart(10, '0');
+                const cb = String(b['Cód Cliente'] || '').padStart(10, '0');
+                return ca.localeCompare(cb);
+            });
+            
+            const vistos = new Map();
+            const unicos = [];
+            
+            for (const row of ordenados) {
+                const cnpj = limparCnpjCpf(row['CNPJ/CPF']);
+                const nome = normalizarTexto(row['Nome']);
+                const fantasia = normalizarTexto(row['Nome Fantasia']);
+                
+                let chave;
+                let motivo;
+                if (cnpj) {
+                    chave = `CNPJ_${cnpj}`;
+                    motivo = 'CNPJ duplicado';
+                } else {
+                    chave = `NOME_${nome}_${fantasia}`;
+                    motivo = 'Nome+Fantasia duplicado';
+                }
+                
+                if (vistos.has(chave)) {
+                    duplicados.push({
+                        ...row,
+                        _motivo: motivo,
+                        _codigoMantido: vistos.get(chave).codigo,
+                        _nomeMantido: vistos.get(chave).nome
+                    });
+                } else {
+                    vistos.set(chave, { codigo: row['Cód Cliente'], nome: row['Nome'] });
+                    unicos.push(row);
+                }
+            }
+            
+            addLog(`⚠️ ${duplicados.length} registros duplicados foram removidos`, 'warning');
+            
+            for (const row of unicos) {
+                const codigo = row['Cód Cliente'];
+                const nome = row['Nome'];
+                
+                const tel1 = separarTelefone(row['Numero Tel'] || row['DDD'] || '');
+                const tel2 = separarTelefone(row['Numero_2'] || row['DDD_2'] || '');
+                
+                let numeroOriginal = String(row['Numero'] || '').trim();
+                if (!numeroOriginal || numeroOriginal === '' || numeroOriginal === 'nan' || numeroOriginal === 'None') {
+                    numeroOriginal = 'S/N';
+                }
+                
+                // FUNÇÃO AUXILIAR: usa valor mapeado OU valor padrão
+                const obterValor = (campoDestino, valorMapeado, valorPadrao) => {
+                    if (mapeamentoAtual[campoDestino] && valorMapeado !== undefined && valorMapeado !== '' && valorMapeado !== null) {
+                        return valorMapeado;
+                    }
+                    return valorPadrao;
+                };
+                
+                const registro = {
+                    'Cód Cliente': codigo,
+                    'Nome': String(nome || '').slice(0, 60),
+                    'Nome Fantasia': String(row['Nome Fantasia'] || '').slice(0, 20),
+                    'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']),
+                    'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF']),
+                    'Tipo de Inscrição': mapearTipoInscricao(row),
+                    'Inscrição': String(row['Inscrição'] || '').replace('ISENTO', '').slice(0, 20),
+                    'Segmento': obterValor('Segmento', row['Segmento'], config['Segmento']),
+                    'Cód Grupo de Cliente': obterValor('Cód Grupo de Cliente', row['Cód Grupo de Cliente'], config['Cód Grupo de Cliente']),
+                    'Data de Cadastro': parseData(row['Data de Cadastro']),
+                    'Data da 1ª compra': parseData(row['Data da 1ª compra']),
+                    'Data Ult Compra': parseData(row['Data Ult Compra']),
+                    'Limite de Crédito': obterValor('Limite de Crédito', row['Limite de Crédito'], 0),
+                    'Cód Tab Preço': obterValor('Cód Tab Preço', row['Cód Tab Preço'], config['Cód Tab Preço']),
+                    'Form De Pgto': obterValor('Form De Pgto', row['Form De Pgto'], config['Form De Pgto']),
+                    'Condição De Pgto': obterValor('Condição De Pgto', row['Condição De Pgto'], config['Condição De Pgto']),
+                    'Email': String(row['Email'] || '').slice(0, 80),
+                    'Site': String(row['Site'] || '').slice(0, 50),
+                    'Cód Rota': obterValor('Cód Rota', row['Cód Rota'], config['Cód Rota']),
+                    'Banco': obterValor('Banco', row['Banco'], config['Banco']),
+                    'Agência': obterValor('Agência', row['Agência'], config['Agência']),
+                    'Conta': obterValor('Conta', row['Conta'], config['Conta']),
+                    'Cód Tipo tributação': obterValor('Cód Tipo tributação', row['Cód Tipo tributação'], config['Cód Tipo tributação']),
+                    'Endereco': String(row['Endereco'] || '').slice(0, 60),
+                    'Bairro': String(row['Bairro'] || '').slice(0, 60),
+                    'Municipio': String(row['Municipio'] || '').slice(0, 60),
+                    'Cep': limparCep(row['Cep']),
+                    'Estado': String(row['Estado'] || '').slice(0, 2).toUpperCase(),
+                    'Numero': numeroOriginal.slice(0, 15),
+                    'Complemento': String(row['Complemento'] || '').slice(0, 60),
+                    'DDD': tel1.ddd,
+                    'Numero Tel': tel1.num,
+                    'Nome Contato': String(row['Nome Contato'] || '').slice(0, 30),
+                    'Cargo': obterValor('Cargo', row['Cargo'], config['Cargo']),
+                    'Email Contato': String(row['Email'] || '').slice(0, 50),
+                    'DDD_2': tel2.ddd,
+                    'Numero_2': tel2.num,
+                    'Cód Vendedor': obterValor('Cód Vendedor', row['Cód Vendedor'], config['Cód Vendedor']),
+                    'Ativo': mapearAtivo(row['Ativo'])
+                };
+                
+                dadosProcessados.push(registro);
+            }
+            
+            dadosOriginaisSnapshot = JSON.parse(JSON.stringify(dadosProcessados));
+            
+            addLog(`✅ ${dadosProcessados.length} registros processados com sucesso`, 'success');
+            
+            atualizarEstatisticas();
+            renderizarTabelaClientes();
+            renderizarTabelaDuplicados();
+            renderizarLog();
+            atualizarBannerAlteracoes();
+            
+            document.getElementById('step4').classList.add('hidden');
+            document.getElementById('step5').classList.remove('hidden');
+            document.getElementById('step6').classList.remove('hidden');
+        }
+
+        function atualizarEstatisticas() {
+            const ativos = dadosProcessados.filter(r => r['Ativo'] === 1).length;
+            const inativos = dadosProcessados.length - ativos;
+            const semCnpj = dadosProcessados.filter(r => !r['CNPJ/CPF']).length;
+            const linhasAlteradas = new Set(alteracoesDetalhadas.map(a => a.idx)).size;
+            
+            document.getElementById('statsContainer').innerHTML = `
+                <div class="stat-card">
+                    <div class="label">Total Original</div>
+                    <div class="value">${dadosOriginais.length}</div>
+                </div>
+                <div class="stat-card danger">
+                    <div class="label">Sem Código (Excluídos)</div>
+                    <div class="value">${registrosSemCodigo}</div>
+                </div>
+                <div class="stat-card warning">
+                    <div class="label">Duplicados Removidos</div>
+                    <div class="value">${duplicados.length}</div>
+                </div>
+                <div class="stat-card success">
+                    <div class="label">Registros Válidos</div>
+                    <div class="value">${dadosProcessados.length}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Ativos / Inativos</div>
+                    <div class="value">${ativos}/${inativos}</div>
+                </div>
+                <div class="stat-card info">
+                    <div class="label">🔸 Registros Alterados</div>
+                    <div class="value">${linhasAlteradas}</div>
+                </div>
+            `;
+            
+            document.getElementById('countClientes').textContent = dadosProcessados.length;
+            document.getElementById('countDuplicados').textContent = duplicados.length;
+        }
+
+        function renderizarTabelaClientes() {
+            if (dadosProcessados.length === 0) return;
+            
+            const colunas = Object.keys(dadosProcessados[0]);
+            const thead = document.getElementById('theadClientes');
+            thead.innerHTML = '<tr>' + colunas.map(c => `<th>${c}</th>`).join('') + '</tr>';
+            
+            const linhasAlteradasSet = new Set(alteracoesDetalhadas.map(a => a.idx));
+            
+            const tbody = document.getElementById('tbodyClientes');
+            tbody.innerHTML = dadosProcessados.map((row, idx) => {
+                const linhaAlterada = linhasAlteradasSet.has(idx);
+                return `<tr class="${linhaAlterada ? 'linha-alterada' : ''}" data-idx="${idx}">` + 
+                    colunas.map(col => {
+                        const val = row[col] ?? '';
+                        const foiAlterado = alteracoesDetalhadas.some(a => a.idx === idx && a.campo === col);
+                        return `<td><input type="text" value="${String(val).replace(/"/g, '&quot;')}" 
+                            class="${foiAlterado ? 'campo-alterado' : ''}"
+                            onchange="atualizarCampo(${idx}, '${col}', this.value)" 
+                            ${['Cód Cliente'].includes(col) ? 'readonly style="background:#f3f4f6"' : ''}></td>`;
+                    }).join('') + '</tr>';
+            }).join('');
+        }
+
+        function renderizarTabelaDuplicados() {
+            if (duplicados.length === 0) {
+                document.getElementById('tbodyDuplicados').innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">Nenhum duplicado encontrado</td></tr>';
+                return;
+            }
+            
+            const colunas = ['Cód Cliente', 'Nome', 'Nome Fantasia', 'CNPJ/CPF', 'Municipio'];
+            const thead = document.getElementById('theadDuplicados');
+            thead.innerHTML = '<tr>' + colunas.map(c => `<th>${c}</th>`).join('') + '<th>Motivo</th><th>Mantido (Cód)</th><th>Mantido (Nome)</th></tr>';
+            
+            const tbody = document.getElementById('tbodyDuplicados');
+            tbody.innerHTML = duplicados.map(row => {
+                return '<tr class="duplicado">' + colunas.map(c => `<td>${row[c] || ''}</td>`).join('') + 
+                    `<td><span class="badge badge-warning">${row._motivo}</span></td>` +
+                    `<td>${row._codigoMantido}</td><td>${row._nomeMantido}</td></tr>`;
+            }).join('');
+        }
+
+        function atualizarCampo(idx, campo, valor) {
+            const valorAnterior = dadosProcessados[idx][campo];
+            
+            if (String(valorAnterior) === String(valor)) return;
+            
+            dadosProcessados[idx][campo] = valor;
+            
+            alteracoesDetalhadas = alteracoesDetalhadas.filter(
+                a => !(a.idx === idx && a.campo === campo)
+            );
+            
+            alteracoesDetalhadas.push({
+                idx: idx,
+                codigo: dadosProcessados[idx]['Cód Cliente'],
+                nome: dadosProcessados[idx]['Nome'],
+                campo: campo,
+                valorAnterior: valorAnterior,
+                valorNovo: valor,
+                dataHora: new Date().toLocaleString()
+            });
+            
+            addLog(`✏️ <strong>${dadosProcessados[idx]['Cód Cliente']}</strong> - ${campo}: "${valorAnterior}" → "${valor}"`, 'warning');
+            
+            renderizarTabelaClientes();
+            atualizarEstatisticas();
+            atualizarBannerAlteracoes();
+            renderizarLog();
+        }
+
+        function atualizarBannerAlteracoes() {
+            const banner = document.getElementById('alteracoesBanner');
+            const totalAlteracoes = alteracoesDetalhadas.length;
+            const linhasAlteradas = new Set(alteracoesDetalhadas.map(a => a.idx)).size;
+            
+            if (totalAlteracoes > 0) {
+                banner.classList.remove('hidden');
+                document.getElementById('contadorAlteracoes').textContent = totalAlteracoes;
+                document.getElementById('contadorLinhas').textContent = linhasAlteradas;
+                document.getElementById('badgeAlteracoes').textContent = totalAlteracoes;
+            } else {
+                banner.classList.add('hidden');
+            }
+        }
+
+        function filtrarTabela() {
+            const busca = document.getElementById('searchInput').value.toLowerCase();
+            const filtroAtivo = document.getElementById('filterAtivo').value;
+            const linhasAlteradasSet = new Set(alteracoesDetalhadas.map(a => a.idx));
+            const linhas = document.querySelectorAll('#tbodyClientes tr');
+            
+            linhas.forEach((linha, idx) => {
+                const row = dadosProcessados[idx];
+                const texto = Object.values(row).join(' ').toLowerCase();
+                const ativo = String(row['Ativo']);
+                const foiAlterada = linhasAlteradasSet.has(idx);
+                
+                const matchBusca = !busca || texto.includes(busca);
+                let matchAtivo = true;
+                
+                if (filtroAtivo === 'alterado') {
+                    matchAtivo = foiAlterada;
+                } else if (filtroAtivo) {
+                    matchAtivo = ativo === filtroAtivo;
+                }
+                
+                linha.style.display = (matchBusca && matchAtivo) ? '' : 'none';
+            });
+        }
+
+        function mudarTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tab}`).classList.add('active');
+        }
+
+        function addLog(msg, tipo = 'info') {
+            logAlteracoes.unshift({ msg, tipo, hora: new Date().toLocaleTimeString() });
+        }
+
+        function renderizarLog() {
+            const container = document.getElementById('logContainer');
+            
+            if (alteracoesDetalhadas.length > 0) {
+                let html = `
+                    <div class="alert alert-warning">
+                        <strong>📝 Detalhes das Alterações Manuais (${alteracoesDetalhadas.length})</strong>
+                    </div>
+                `;
+                
+                html += alteracoesDetalhadas.map(a => `
+                    <div class="log-item warning">
+                        <span class="timestamp">${a.dataHora}</span><br>
+                        <strong>${a.codigo}</strong> - ${a.nome}<br>
+                        📌 <strong>${a.campo}</strong>: 
+                        <span style="color:#ef4444; text-decoration: line-through;">"${a.valorAnterior}"</span> 
+                        → 
+                        <span style="color:#10b981; font-weight:bold;">"${a.valorNovo}"</span>
+                    </div>
+                `).join('');
+                
+                html += '<hr style="margin: 20px 0;">';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '';
+            }
+            
+            container.innerHTML += logAlteracoes.map(l => 
+                `<div class="log-item ${l.tipo}">
+                    <span class="timestamp">${l.hora}</span> - ${l.msg}
+                </div>`
+            ).join('');
+        }
+
+        function exportarDadosAtualizados() {
+            if (dadosProcessados.length === 0) {
+                alert('Nenhum dado para exportar!');
+                return;
+            }
+            
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const nomeArquivo = `CLIENTES_IMPORT_ATUALIZADO_${timestamp}.xlsx`;
+            
+            const ws = XLSX.utils.json_to_sheet(dadosProcessados);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'CLIENTES');
+            
+            if (alteracoesDetalhadas.length > 0) {
+                const resumoAlteracoes = alteracoesDetalhadas.map(a => ({
+                    'Código': a.codigo,
+                    'Nome': a.nome,
+                    'Campo Alterado': a.campo,
+                    'Valor Anterior': a.valorAnterior,
+                    'Valor Novo': a.valorNovo,
+                    'Data/Hora': a.dataHora
+                }));
+                const wsLog = XLSX.utils.json_to_sheet(resumoAlteracoes);
+                XLSX.utils.book_append_sheet(wb, wsLog, 'ALTERACOES');
+            }
+            
+            XLSX.writeFile(wb, nomeArquivo);
+            
+            addLog(`💾 Novo arquivo gerado: ${nomeArquivo}`, 'success');
+            renderizarLog();
+            
+            alert(`✅ Arquivo gerado com sucesso!\n\n📄 ${nomeArquivo}`);
+        }
+
+        function exportarApenasAlteracoes() {
+            if (alteracoesDetalhadas.length === 0) {
+                alert('Nenhuma alteração foi feita na tabela!');
+                return;
+            }
+            
+            const indicesAlterados = [...new Set(alteracoesDetalhadas.map(a => a.idx))];
+            const dadosAlterados = indicesAlterados.map(idx => dadosProcessados[idx]);
+            
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const nomeArquivo = `CLIENTES_SOMENTE_ALTERADOS_${timestamp}.xlsx`;
+            
+            const ws = XLSX.utils.json_to_sheet(dadosAlterados);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'ALTERADOS');
+            
+            XLSX.writeFile(wb, nomeArquivo);
+            alert(`✅ Arquivo gerado: ${nomeArquivo}`);
+        }
+
+        function visualizarAlteracoes() {
+            if (alteracoesDetalhadas.length === 0) {
+                alert('Nenhuma alteração foi feita!');
+                return;
+            }
+            
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab')[2].classList.add('active');
+            document.getElementById('tab-log').classList.add('active');
+        }
+
+        function descartarAlteracoes() {
+            if (alteracoesDetalhadas.length === 0) {
+                alert('Não há alterações para descartar!');
+                return;
+            }
+            
+            if (!confirm(`⚠️ Descartar todas as ${alteracoesDetalhadas.length} alterações?\n\nEsta ação não pode ser desfeita!`)) {
+                return;
+            }
+            
+            dadosProcessados = JSON.parse(JSON.stringify(dadosOriginaisSnapshot));
+            alteracoesDetalhadas = [];
+            
+            addLog(`↩️ Todas as alterações foram descartadas`, 'warning');
+            
+            renderizarTabelaClientes();
+            atualizarEstatisticas();
+            atualizarBannerAlteracoes();
+            renderizarLog();
+        }
+
+        function exportarExcel() {
+            if (dadosProcessados.length === 0) {
+                alert('Nenhum dado para exportar!');
+                return;
+            }
+            
+            const ws = XLSX.utils.json_to_sheet(dadosProcessados);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'CLIENTES');
+            XLSX.writeFile(wb, `CLIENTES_IMPORT_${new Date().toISOString().slice(0,10)}.xlsx`);
+            addLog('💾 Arquivo CLIENTES_IMPORT.xlsx exportado', 'success');
+            renderizarLog();
+        }
+
+        function exportarDuplicados() {
+            if (duplicados.length === 0) {
+                alert('Nenhum duplicado encontrado!');
+                return;
+            }
+            
+            const dados = duplicados.map(d => ({
+                'Código Removido': d['Cód Cliente'],
+                'Nome Removido': d['Nome'],
+                'Fantasia': d['Nome Fantasia'],
+                'CNPJ/CPF': d['CNPJ/CPF'],
+                'Cidade': d['Municipio'],
+                'UF': d['Estado'],
+                'Motivo': d._motivo,
+                'Código Mantido': d._codigoMantido,
+                'Nome Mantido': d._nomeMantido
+            }));
+            
+            const ws = XLSX.utils.json_to_sheet(dados);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'DUPLICADOS');
+            XLSX.writeFile(wb, `DUPLICADOS_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        function exportarLog() {
+            if (alteracoesDetalhadas.length === 0 && logAlteracoes.length === 0) {
+                alert('Nenhum log para exportar!');
+                return;
+            }
+            
+            const wb = XLSX.utils.book_new();
+            
+            if (alteracoesDetalhadas.length > 0) {
+                const resumoAlteracoes = alteracoesDetalhadas.map(a => ({
+                    'Código': a.codigo,
+                    'Nome': a.nome,
+                    'Campo Alterado': a.campo,
+                    'Valor Anterior': a.valorAnterior,
+                    'Valor Novo': a.valorNovo,
+                    'Data/Hora': a.dataHora
+                }));
+                const wsAlt = XLSX.utils.json_to_sheet(resumoAlteracoes);
+                XLSX.utils.book_append_sheet(wb, wsAlt, 'ALTERACOES_MANUAIS');
+            }
+            
+            const wsLog = XLSX.utils.json_to_sheet(logAlteracoes);
+            XLSX.utils.book_append_sheet(wb, wsLog, 'LOG_GERAL');
+            
+            XLSX.writeFile(wb, `LOG_PROCESSAMENTO_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        function resetar() {
+            if (!confirm('Deseja realmente reiniciar? Todos os dados serão perdidos.')) return;
+            dadosOriginais = [];
+            camposOrigem = [];
+            dadosMapeados = [];
+            dadosProcessados = [];
+            dadosOriginaisSnapshot = [];
+            duplicados = [];
+            logAlteracoes = [];
+            alteracoesDetalhadas = [];
+            registrosSemCodigo = 0;
+            mapeamentoAtual = {};
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step3').classList.add('hidden');
+            document.getElementById('step4').classList.add('hidden');
+            document.getElementById('step5').classList.add('hidden');
+            document.getElementById('step6').classList.add('hidden');
+            document.getElementById('alteracoesBanner').classList.add('hidden');
+            fileInput.value = '';
+        }
+    </script>
+</body>
+</html>
