@@ -46,6 +46,7 @@ function App() {
   
   // ESTADOS LEVES PARA UI
   const [logAlteracoes, setLogAlteracoes] = useState([]);
+  const [alteracoesDetalhadas, setAlteracoesDetalhadas] = useState([]);
   const [filtroAtivo, setFiltroAtivo] = useState('todos');
   const [progresso, setProgresso] = useState(0);
   const [stats, setStats] = useState({ total: 0, validos: 0, duplicados: 0 });
@@ -271,7 +272,7 @@ function App() {
           // Sempre usa setTimeout para dar controle ao event loop
           setTimeout(processChunk, 0);
         } else {
-          // Finalização: ordenar e remover duplicatas
+          // Finalização: ordenar e remover duplicatas (CNPJ igual mantém menor código)
           const ordenados = [...dadosProcessadosNovo].sort((a, b) => {
             const ca = String(a['Cód Cliente'] || '').padStart(10, '0');
             const cb = String(b['Cód Cliente'] || '').padStart(10, '0');
@@ -280,30 +281,48 @@ function App() {
 
           const vistos = new Map();
           const unicos = [];
+          const listaDuplicados = [];
 
           for (let i = 0; i < ordenados.length; i++) {
             const row = ordenados[i];
             const cnpj = limparCnpjCpf(row['CNPJ/CPF']);
-            const nome = normalizarTexto(row['Nome']);
-            const fantasia = normalizarTexto(row['Nome Fantasia']);
-            const chave = `${cnpj}-${nome}-${fantasia}`;
-
+            
+            // Usa apenas CNPJ como chave para duplicidade
+            const chave = cnpj;
+            
             if (!vistos.has(chave)) {
-              vistos.set(chave, i);
+              // Primeiro registro com este CNPJ (menor código pois está ordenado)
+              vistos.set(chave, row['Cód Cliente']);
               unicos.push(row);
+            } else {
+              // Duplicado - armazena info do duplicado
+              listaDuplicados.push({
+                ...row,
+                _motivo: 'CNPJ',
+                _codigoMantido: vistos.get(chave)
+              });
             }
           }
 
           setDadosProcessados(unicos);
+          setDuplicados(listaDuplicados);
           setStep(5);
           setProcessando(false);
           
           const novaAlteracao = {
             timestamp: new Date().toISOString(),
-            mensagem: `Processamento concluído: ${unicos.length} registros`,
+            mensagem: `Processamento concluído: ${unicos.length} registros válidos, ${listaDuplicados.length} duplicados removidos`,
             tipo: 'success'
           };
           setLogAlteracoes(prev => [...prev, novaAlteracao]);
+          
+          if (listaDuplicados.length > 0) {
+            setLogAlteracoes(prev => [...prev, {
+              timestamp: new Date().toISOString(),
+              mensagem: `${listaDuplicados.length} clientes duplicados por CNPJ movidos para aba "Duplicados"`,
+              tipo: 'warning'
+            }]);
+          }
         }
       };
       
