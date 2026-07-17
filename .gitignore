@@ -1,57 +1,25 @@
-```
-# Dependencies
-node_modules/
+# Examples 1:
 
-# Build outputs
+# Example 2 (Project with artifacts):
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
 dist/
 build/
-coverage/
-htmlcov/
-
-# Environment variables
+# Dependencies
+.venv/
+venv/
+node_modules/
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+# Environment
 .env
 .env.local
 .env.*
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-
-# Virtual environments
-venv/
-.venv/
-env/
-ENV/
-
-# IDE specific
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-*.tmp
-
-# Logs
-*.log
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Testing
-.mypy_cache/
-.pytest_cache/
-.coverage
-
-# Node.js
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Build tools
-target/
-.gradle/
-```
