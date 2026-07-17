@@ -48,8 +48,8 @@ export const camposDestino = [
 // Estes campos, quando mapeados, não precisam de valor padrão
 // ============================================
 export const camposConfiguraveis = [
-    { campo: 'Segmento', default: 'CL', label: 'Segmento *', maxlength: 4 },
-    { campo: 'Cód Tab Preço', default: 'PADRAO', label: 'Cód Tab Preço *', maxlength: 8 },
+    { campo: 'Segmento', default: '', label: 'Segmento *', maxlength: 4 },
+    { campo: 'Cód Tab Preço', default: '', label: 'Cód Tab Preço *', maxlength: 8 },
     { 
         campo: 'Form De Pgto', 
         default: 'DP', 
@@ -62,9 +62,9 @@ export const camposConfiguraveis = [
             { valor: 'DC', texto: 'DC - Depósito' }
         ]
     },
-    { campo: 'Condição De Pgto', default: '1', label: 'Condição de Pagamento', maxlength: 10 },
-    { campo: 'Cód Vendedor', default: 'PATRICKK', label: 'Cód Vendedor *', maxlength: 8 },
-    { campo: 'Cód Tipo tributação', default: '1', label: 'Cód Tipo Tributação *', maxlength: 5 },
+    { campo: 'Condição De Pgto', default: '', label: 'Condição de Pagamento', maxlength: 10 },
+    { campo: 'Cód Vendedor', default: '', label: 'Cód Vendedor *', maxlength: 8 },
+    { campo: 'Cód Tipo tributação', default: '', label: 'Cód Tipo Tributação *', maxlength: 5 },
     { campo: 'Cód Grupo de Cliente', default: '', label: 'Cód Grupo de Cliente', maxlength: 10 },
     { campo: 'Cód Rota', default: '', label: 'Cód Rota', maxlength: 8 },
     { campo: 'Banco', default: '', label: 'Banco', maxlength: 10 },
