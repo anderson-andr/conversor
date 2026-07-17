@@ -201,7 +201,7 @@ function App() {
       const total = dadosMapeados.length;
       const chunkSize = 1000; // Aumentado para 1000 registros por vez (mais eficiente)
       let currentIndex = 0;
-      const dadosProcessadosNovo = [];
+      const dadosMapeados = [];
       
       const processChunk = () => {
         const startTime = performance.now();
@@ -259,7 +259,7 @@ function App() {
             'Ativo': mapearAtivo(row['Ativo']) !== undefined ? mapearAtivo(row['Ativo']) : 1
           };
 
-          dadosProcessadosNovo.push(registro);
+          dadosMapeados.push(registro);
         }
         
         currentIndex = chunkEnd;
@@ -273,7 +273,7 @@ function App() {
           setTimeout(processChunk, 0);
         } else {
           // Finalização: ordenar e remover duplicatas (CNPJ igual mantém menor código)
-          const ordenados = [...dadosProcessadosNovo].sort((a, b) => {
+          const ordenados = [...dadosMapeados].sort((a, b) => {
             const ca = String(a['Cód Cliente'] || '').padStart(10, '0');
             const cb = String(b['Cód Cliente'] || '').padStart(10, '0');
             return ca.localeCompare(cb);
@@ -367,24 +367,24 @@ function App() {
 
   // Exportação
   const exportarExcel = useCallback(() => {
-    const ws = XLSX.utils.json_to_sheet(dadosProcessados);
+    const ws = XLSX.utils.json_to_sheet(dadosProcessadosRef.current);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
     
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     XLSX.writeFile(wb, `CLIENTES_IMPORT_${timestamp}.xlsx`);
-  }, [dadosProcessados]);
+  }, [dadosProcessadosRef.current]);
 
   const exportarApenasAlteracoes = useCallback(() => {
     const indicesAlterados = [...new Set(alteracoesDetalhadas.map(a => a.idx))];
-    const dadosAlterados = indicesAlterados.map(idx => dadosProcessados[idx]);
+    const dadosAlterados = indicesAlterados.map(idx => dadosProcessadosRef.current[idx]);
     
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const ws = XLSX.utils.json_to_sheet(dadosAlterados);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Alterados');
     XLSX.writeFile(wb, `CLIENTES_SOMENTE_ALTERADOS_${timestamp}.xlsx`);
-  }, [dadosProcessados, alteracoesDetalhadas]);
+  }, [dadosProcessadosRef.current, alteracoesDetalhadas]);
 
   const descartarAlteracoes = useCallback(() => {
     if (window.confirm('Deseja realmente descartar todas as alterações feitas?')) {
@@ -408,16 +408,16 @@ function App() {
   }, []);
 
   // Estatísticas
-  const estatisticas = dadosProcessados.length > 0 ? {
-    total: dadosProcessados.length,
-    ativos: dadosProcessados.filter(r => r['Ativo'] === 1).length,
-    inativos: dadosProcessados.filter(r => r['Ativo'] === 0).length,
-    semCnpj: dadosProcessados.filter(r => !r['CNPJ/CPF']).length,
+  const estatisticas = dadosProcessadosRef.current.length > 0 ? {
+    total: dadosProcessadosRef.current.length,
+    ativos: dadosProcessadosRef.current.filter(r => r['Ativo'] === 1).length,
+    inativos: dadosProcessadosRef.current.filter(r => r['Ativo'] === 0).length,
+    semCnpj: dadosProcessadosRef.current.filter(r => !r['CNPJ/CPF']).length,
     linhasAlteradas: new Set(alteracoesDetalhadas.map(a => a.idx)).size
   } : null;
 
   // Filtros
-  const dadosFiltrados = dadosProcessados.filter((row, idx) => {
+  const dadosFiltrados = dadosProcessadosRef.current.filter((row, idx) => {
     const texto = Object.values(row).join(' ').toLowerCase();
     const ativo = String(row['Ativo']);
     const foiAlterada = alteracoesDetalhadas.some(a => a.idx === idx);
@@ -746,14 +746,14 @@ function App() {
                   <table>
                     <thead>
                       <tr>
-                        {Object.keys(dadosProcessados[0] || {}).map(campo => (
+                        {Object.keys(dadosProcessadosRef.current[0] || {}).map(campo => (
                           <th key={campo}>{campo}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {dadosFiltrados.map((row, idxReal) => {
-                        const idx = dadosProcessados.indexOf(row);
+                        const idx = dadosProcessadosRef.current.indexOf(row);
                         const foiAlterado = alteracoesDetalhadas.some(a => a.idx === idx);
                         
                         return (
