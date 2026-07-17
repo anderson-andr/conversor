@@ -132,13 +132,13 @@ function App() {
   const mapearAutomaticamente = useCallback(() => {
     const novoMapeamento = {};
     camposDestino.forEach(campo => {
-      const origemDetectada = detectarMapeamentoAutomatico(campo.nome, camposOrigem, regrasMapeamento);
+      const origemDetectada = detectarMapeamentoAutomatico(campo.nome, camposOrigemRef.current, regrasMapeamento);
       if (origemDetectada) {
         novoMapeamento[campo.nome] = origemDetectada;
       }
     });
     setMapeamentoAtual(novoMapeamento);
-  }, [camposOrigem]);
+  }, []);
 
   const resetarMapeamento = useCallback(() => {
     setMapeamentoAtual({});
@@ -483,7 +483,7 @@ function App() {
           </div>
           <div className="mapeamento-lista" id="mapeamentoLista">
             {camposDestino.map(campo => {
-              const origemDetectada = detectarMapeamentoAutomatico(campo.nome, camposOrigem, regrasMapeamento);
+              const origemDetectada = detectarMapeamentoAutomatico(campo.nome, camposOrigemRef.current, regrasMapeamento);
               const mapeado = !!mapeamentoAtual[campo.nome];
               
               return (
@@ -502,7 +502,7 @@ function App() {
                       onChange={(e) => handleMapeamentoChange(campo.nome, e.target.value)}
                     >
                       <option value="">-- Selecione --</option>
-                      {camposOrigem.map(campoO => (
+                      {camposOrigemRef.current.map(campoO => (
                         <option key={campoO} value={campoO}>{campoO}</option>
                       ))}
                     </select>
