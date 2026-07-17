@@ -39,6 +39,12 @@ function App() {
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [tamanhoPagina, setTamanhoPagina] = useState(100);
   const [totalPaginas, setTotalPaginas] = useState(1);
+  
+  // ESTADOS ADICIONAIS
+  const [alteracoesDetalhadas, setAlteracoesDetalhadas] = useState([]);
+  const [logAlteracoes, setLogAlteracoes] = useState([]);
+  const [filtroAtivo, setFiltroAtivo] = useState('todos');
+  const [progresso, setProgresso] = useState(0);
 
   // Upload de arquivo com processamento assíncrono para arquivos grandes
   const handleFileUpload = useCallback((file) => {
