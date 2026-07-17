@@ -484,7 +484,7 @@ function App() {
           <div className="mapeamento-lista" id="mapeamentoLista">
             {camposDestino.map(campo => {
               const origemDetectada = detectarMapeamentoAutomatico(campo.nome, camposOrigemRef.current, regrasMapeamento);
-              const mapeado = !!mapeamentoAtual[campo.nome];
+              const mapeado = !!(mapeamentoAtualRef.current && mapeamentoAtualRef.current[campo.nome]);
               
               return (
                 <div 
