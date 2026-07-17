@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import XLSX from 'xlsx';
 import './App.css';
 import { camposDestino, camposConfiguraveis, regrasMapeamento } from './data/campos';
@@ -28,22 +28,39 @@ function App() {
   const [filtroAtivo, setFiltroAtivo] = useState('todos');
   const [alteracoesDetalhadas, setAlteracoesDetalhadas] = useState([]);
   const [logAlteracoes, setLogAlteracoes] = useState([]);
+  const [processando, setProcessando] = useState(false);
+  const [progresso, setProgresso] = useState(0);
 
-  // Upload de arquivo
+  // Upload de arquivo com processamento assíncrono para arquivos grandes
   const handleFileUpload = useCallback((file) => {
+    setStep(1); // Manter na etapa 1 durante leitura
+    
     const reader = new FileReader();
     reader.onload = (e) => {
-      const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-      
-      setDadosOriginais(jsonData);
-      if (jsonData.length > 0) {
-        const campos = Object.keys(jsonData[0]);
-        setCamposOrigem(campos);
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        
+        // Usar setTimeout para permitir que a UI atualize antes de processar
+        setTimeout(() => {
+          const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          
+          console.log(`Arquivo carregado: ${jsonData.length} linhas`);
+          setDadosOriginais(jsonData);
+          if (jsonData.length > 0) {
+            const campos = Object.keys(jsonData[0]);
+            setCamposOrigem(campos);
+          }
+          setStep(2);
+        }, 50);
+      } catch (error) {
+        console.error('Erro ao ler arquivo:', error);
+        alert('Erro ao ler o arquivo. Verifique se é uma planilha válida.');
       }
-      setStep(2);
+    };
+    reader.onerror = () => {
+      alert('Erro ao ler o arquivo.');
     };
     reader.readAsArrayBuffer(file);
   }, []);
@@ -104,20 +121,22 @@ function App() {
 
     if (obrigatoriosNaoMapeados.length > 0) {
       const continuar = window.confirm(
-        `Existem ${obrigatoriosNaoMapeados.length} campos obrigatórios não mapeados. Deseja continuar mesmo assim?`
+        `Existem ${obrigatoriosNaoMapeados.length} campos obrigatórios não mapeados. Deseja continuar mesmo assim?\n\nCampos não mapeados ficarão vazios e poderão ser preenchidos com valores padrão na próxima etapa.`
       );
       if (!continuar) return;
     }
 
+    // Mapeia apenas os campos que foram explicitamente selecionados
+    // Campos não mapeados permanecem sem valor para serem preenchidos com defaults depois
     const dadosMapeadosNovo = dadosOriginais.map(row => {
       const newRow = {};
       camposDestino.forEach(campo => {
         const campoOrigem = mapeamentoAtual[campo.nome];
-        if (campoOrigem && row[campoOrigem] !== undefined) {
+        // Apenas copia se houver mapeamento explícito
+        if (campoOrigem && row[campoOrigem] !== undefined && row[campoOrigem] !== null) {
           newRow[campo.nome] = row[campoOrigem];
-        } else {
-          newRow[campo.nome] = '';
         }
+        // Se não mapeado, o campo fica undefined (será tratado com defaults na etapa 4)
       });
       return newRow;
     });
@@ -143,96 +162,127 @@ function App() {
   }, []);
 
   const processarPlanilha = useCallback(() => {
-    const dadosComCodigo = dadosMapeados.filter(row => {
-      const codigo = String(row['Cód Cliente'] || '').trim();
-      return codigo !== '';
-    });
-
-    const ordenados = [...dadosComCodigo].sort((a, b) => {
-      const ca = String(a['Cód Cliente'] || '').padStart(10, '0');
-      const cb = String(b['Cód Cliente'] || '').padStart(10, '0');
-      return ca.localeCompare(cb);
-    });
-
-    const vistos = new Map();
-    const unicos = [];
-    const duplicadosEncontrados = [];
-
-    ordenados.forEach((row, idx) => {
-      const cnpj = limparCnpjCpf(row['CNPJ/CPF']);
-      const nome = normalizarTexto(row['Nome']);
-      const fantasia = normalizarTexto(row['Nome Fantasia']);
-      const chave = `${cnpj}-${nome}-${fantasia}`;
-
-      if (vistos.has(chave)) {
-        duplicadosEncontrados.push({ ...row, idx, duplicadoDe: vistos.get(chave) });
-      } else {
-        vistos.set(chave, idx);
-        unicos.push(row);
-      }
-    });
-
-    const dadosProcessadosNovo = unicos.map((row, idx) => {
-      const codigo = row['Cód Cliente'];
-      const nome = row['Nome'];
-
-      const tel1 = separarTelefone(row['Numero Tel'] || row['DDD'] || '');
-      const tel2 = separarTelefone(row['Numero_2'] || row['DDD_2'] || '');
-
-      const registro = {
-        'Cód Cliente': codigo,
-        'Nome': nome || configPadrao['Nome'] || '',
-        'Nome Fantasia': row['Nome Fantasia'] || configPadrao['Nome Fantasia'] || '',
-        'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']) || configPadrao['Tipo de Pessoa'] || 'F',
-        'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF']),
-        'Tipo de Inscrição': mapearTipoInscricao(row),
-        'Inscrição': row['Inscrição'] || '',
-        'Segmento': row['Segmento'] || configPadrao['Segmento'] || 'CL',
-        'Cód Grupo de Cliente': row['Cód Grupo de Cliente'] || configPadrao['Cód Grupo de Cliente'] || '',
-        'Data de Cadastro': parseData(row['Data de Cadastro']) || parseData(new Date()) || '01/01/2024',
-        'Data da 1ª compra': parseData(row['Data da 1ª compra']) || '',
-        'Data Ult Compra': parseData(row['Data Ult Compra']) || '',
-        'Limite de Crédito': row['Limite de Crédito'] || '',
-        'Cód Tab Preço': row['Cód Tab Preço'] || configPadrao['Cód Tab Preço'] || 'PADRAO',
-        'Form De Pgto': row['Form De Pgto'] || configPadrao['Form De Pgto'] || 'DP',
-        'Condição De Pgto': row['Condição De Pgto'] || configPadrao['Condição De Pgto'] || '1',
-        'Email': row['Email'] || '',
-        'Site': row['Site'] || '',
-        'Cód Rota': row['Cód Rota'] || configPadrao['Cód Rota'] || '',
-        'Banco': row['Banco'] || configPadrao['Banco'] || '',
-        'Agência': row['Agência'] || configPadrao['Agência'] || '',
-        'Conta': row['Conta'] || configPadrao['Conta'] || '',
-        'Cód Tipo tributação': row['Cód Tipo tributação'] || configPadrao['Cód Tipo tributação'] || '1',
-        'Endereco': row['Endereco'] || '',
-        'Bairro': row['Bairro'] || '',
-        'Municipio': row['Municipio'] || '',
-        'Cep': limparCep(row['Cep']),
-        'Estado': row['Estado'] || '',
-        'Numero': row['Numero'] || '',
-        'Complemento': row['Complemento'] || '',
-        'DDD': tel1.ddd,
-        'Numero Tel': tel1.numero,
-        'Nome Contato': row['Nome Contato'] || '',
-        'Cargo': row['Cargo'] || configPadrao['Cargo'] || '',
-        'Email Contato': row['Email Contato'] || '',
-        'DDD_2': tel2.ddd,
-        'Numero_2': tel2.numero,
-        'Cód Vendedor': row['Cód Vendedor'] || configPadrao['Cód Vendedor'] || 'PATRICKK',
-        'Ativo': mapearAtivo(row['Ativo']) !== undefined ? mapearAtivo(row['Ativo']) : 1
-      };
-
-      return registro;
-    });
-
-    setDadosProcessados(dadosProcessadosNovo);
-    setStep(5);
+    setProcessando(true);
+    setProgresso(0);
     
-    const novaAlteracao = {
-      timestamp: new Date().toISOString(),
-      mensagem: `Processamento concluído: ${dadosProcessadosNovo.length} registros`,
-      tipo: 'success'
+    // Usar requestAnimationFrame para processamento em chunks sem travar
+    const total = dadosMapeados.length;
+    const chunkSize = 500; // Processa 500 registros por vez
+    let currentIndex = 0;
+    const dadosProcessadosNovo = [];
+    
+    const processChunk = () => {
+      const startTime = performance.now();
+      const chunkEnd = Math.min(currentIndex + chunkSize, total);
+      
+      // Filtrar e processar chunk atual
+      for (let i = currentIndex; i < chunkEnd; i++) {
+        const row = dadosMapeados[i];
+        const codigo = String(row['Cód Cliente'] || '').trim();
+        
+        if (codigo === '') continue;
+        
+        const tel1 = separarTelefone(row['Numero Tel'] || row['DDD'] || '');
+        const tel2 = separarTelefone(row['Numero_2'] || row['DDD_2'] || '');
+
+        const registro = {
+          'Cód Cliente': codigo,
+          'Nome': normalizarTexto(row['Nome']) || configPadrao['Nome'] || '',
+          'Nome Fantasia': normalizarTexto(row['Nome Fantasia']) || configPadrao['Nome Fantasia'] || '',
+          'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']) || configPadrao['Tipo de Pessoa'] || 'F',
+          'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF']),
+          'Tipo de Inscrição': mapearTipoInscricao(row),
+          'Inscrição': row['Inscrição'] || '',
+          'Segmento': row['Segmento'] || configPadrao['Segmento'] || 'CL',
+          'Cód Grupo de Cliente': row['Cód Grupo de Cliente'] || configPadrao['Cód Grupo de Cliente'] || '',
+          'Data de Cadastro': parseData(row['Data de Cadastro']) || parseData(new Date()) || '01/01/2024',
+          'Data da 1ª compra': parseData(row['Data da 1ª compra']) || '',
+          'Data Ult Compra': parseData(row['Data Ult Compra']) || '',
+          'Limite de Crédito': row['Limite de Crédito'] || '',
+          'Cód Tab Preço': row['Cód Tab Preço'] || configPadrao['Cód Tab Preço'] || 'PADRAO',
+          'Form De Pgto': row['Form De Pgto'] || configPadrao['Form De Pgto'] || 'DP',
+          'Condição De Pgto': row['Condição De Pgto'] || configPadrao['Condição De Pgto'] || '1',
+          'Email': row['Email'] || '',
+          'Site': row['Site'] || '',
+          'Cód Rota': row['Cód Rota'] || configPadrao['Cód Rota'] || '',
+          'Banco': row['Banco'] || configPadrao['Banco'] || '',
+          'Agência': row['Agência'] || configPadrao['Agência'] || '',
+          'Conta': row['Conta'] || configPadrao['Conta'] || '',
+          'Cód Tipo tributação': row['Cód Tipo tributação'] || configPadrao['Cód Tipo tributação'] || '1',
+          'Endereco': row['Endereco'] || '',
+          'Bairro': row['Bairro'] || '',
+          'Municipio': row['Municipio'] || '',
+          'Cep': limparCep(row['Cep']),
+          'Estado': row['Estado'] || '',
+          'Numero': row['Numero'] || '',
+          'Complemento': row['Complemento'] || '',
+          'DDD': tel1.ddd,
+          'Numero Tel': tel1.numero,
+          'Nome Contato': row['Nome Contato'] || '',
+          'Cargo': row['Cargo'] || configPadrao['Cargo'] || '',
+          'Email Contato': row['Email Contato'] || '',
+          'DDD_2': tel2.ddd,
+          'Numero_2': tel2.numero,
+          'Cód Vendedor': row['Cód Vendedor'] || configPadrao['Cód Vendedor'] || 'PATRICKK',
+          'Ativo': mapearAtivo(row['Ativo']) !== undefined ? mapearAtivo(row['Ativo']) : 1
+        };
+
+        dadosProcessadosNovo.push(registro);
+      }
+      
+      currentIndex = chunkEnd;
+      setProgresso(Math.round((currentIndex / total) * 100));
+      
+      // Verifica tempo de processamento do chunk
+      const elapsed = performance.now() - startTime;
+      
+      if (currentIndex < total) {
+        // Se processou rápido (< 50ms), continua imediatamente
+        // Caso contrário, dá uma pequena pausa
+        if (elapsed < 50) {
+          requestAnimationFrame(processChunk);
+        } else {
+          setTimeout(processChunk, 10);
+        }
+      } else {
+        // Finalização: ordenar e remover duplicatas
+        const ordenados = [...dadosProcessadosNovo].sort((a, b) => {
+          const ca = String(a['Cód Cliente'] || '').padStart(10, '0');
+          const cb = String(b['Cód Cliente'] || '').padStart(10, '0');
+          return ca.localeCompare(cb);
+        });
+
+        const vistos = new Map();
+        const unicos = [];
+
+        for (let i = 0; i < ordenados.length; i++) {
+          const row = ordenados[i];
+          const cnpj = limparCnpjCpf(row['CNPJ/CPF']);
+          const nome = normalizarTexto(row['Nome']);
+          const fantasia = normalizarTexto(row['Nome Fantasia']);
+          const chave = `${cnpj}-${nome}-${fantasia}`;
+
+          if (!vistos.has(chave)) {
+            vistos.set(chave, i);
+            unicos.push(row);
+          }
+        }
+
+        setDadosProcessados(unicos);
+        setStep(5);
+        setProcessando(false);
+        
+        const novaAlteracao = {
+          timestamp: new Date().toISOString(),
+          mensagem: `Processamento concluído: ${unicos.length} registros`,
+          tipo: 'success'
+        };
+        setLogAlteracoes(prev => [...prev, novaAlteracao]);
+      }
     };
-    setLogAlteracoes(prev => [...prev, novaAlteracao]);
+    
+    // Inicia processamento após renderização
+    requestAnimationFrame(processChunk);
   }, [dadosMapeados, configPadrao]);
 
   // Atualização de campos
@@ -478,23 +528,38 @@ function App() {
         <div className={`card ${step < 4 ? 'hidden' : ''}`} id="step4">
           <h2>4️⃣ Configurar Valores Padrão</h2>
           <div className="alert alert-info">
-            ℹ️ Preencha apenas os campos que <strong>NÃO vieram da planilha de origem</strong>. 
-            Campos mapeados automaticamente estão ocultos (você pode editar individualmente depois).
+            ℹ️ Preencha apenas os campos que <strong>NÃO foram mapeados</strong> na etapa anterior.
+            <br/>
+            <strong style={{ color: '#28a745' }}>✓ Campos mapeados:</strong> já possuem valores da planilha e não serão sobrescritos.
+            <br/>
+            <strong style={{ color: '#dc3545' }}>⚠ Campos não mapeados:</strong> use os valores abaixo como padrão para todos os registros.
           </div>
           
           <div className="grid" id="gridConfigPadrao">
             {camposConfiguraveis.map(cfg => {
-              const campoMapeado = Object.values(mapeamentoAtual).includes(cfg.campo);
-              if (campoMapeado) return null;
+              // Verifica se o campo foi mapeado explicitamente
+              const campoMapeado = !!mapeamentoAtual[cfg.campo];
               
               return (
-                <div className="form-group" key={cfg.campo}>
-                  <label>{cfg.label}</label>
+                <div 
+                  className={`form-group ${campoMapeado ? 'mapeado' : 'nao-mapeado'}`} 
+                  key={cfg.campo}
+                >
+                  <label>
+                    {cfg.label}
+                    {campoMapeado && (
+                      <span className="badge-mapeado">✓ Mapeado</span>
+                    )}
+                    {!campoMapeado && (
+                      <span className="badge-padrao">⚠ Usará valor padrão</span>
+                    )}
+                  </label>
                   {cfg.tipo === 'select' ? (
                     <select
                       id={`default_${cfg.campo.replace(/\s/g, '_')}`}
-                      defaultValue={cfg.default}
+                      defaultValue={configPadrao[cfg.campo] || cfg.default}
                       onChange={(e) => handleConfigPadraoChange(cfg.campo, e.target.value)}
+                      disabled={campoMapeado}
                     >
                       {cfg.opcoes?.map(op => (
                         <option key={op.valor} value={op.valor}>{op.texto}</option>
@@ -504,17 +569,35 @@ function App() {
                     <input
                       type="text"
                       id={`default_${cfg.campo.replace(/\s/g, '_')}`}
-                      defaultValue={cfg.default}
-                      maxLength={cfg.maxlength}
+                      defaultValue={configPadrao[cfg.campo] || cfg.default}
                       onChange={(e) => handleConfigPadraoChange(cfg.campo, e.target.value)}
+                      disabled={campoMapeado}
+                      placeholder={campoMapeado ? 'Valor virá da planilha' : cfg.placeholder || ''}
+                      maxLength={cfg.maxlength}
                     />
                   )}
                 </div>
               );
             })}
           </div>
+          
+          {processando && (
+            <div className="progress-container">
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${progresso}%` }}></div>
+              </div>
+              <div className="progress-text">Processando... {progresso}%</div>
+            </div>
+          )}
+          
           <div className="actions">
-            <button className="btn btn-primary" onClick={processarPlanilha}>🔄 Processar Dados</button>
+            <button 
+              className="btn btn-primary" 
+              onClick={processarPlanilha}
+              disabled={processando}
+            >
+              {processando ? '⏳ Processando...' : '🔄 Processar Dados'}
+            </button>
           </div>
         </div>
       )}
