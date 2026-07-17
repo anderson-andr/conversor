@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import XLSX from 'xlsx';
 import './App.css';
 import { camposDestino, camposConfiguraveis, regrasMapeamento } from './data/campos';
@@ -30,6 +30,7 @@ function App() {
   const [logAlteracoes, setLogAlteracoes] = useState([]);
   const [processando, setProcessando] = useState(false);
   const [progresso, setProgresso] = useState(0);
+  const fileInputRef = useRef(null);
 
   // Upload de arquivo com processamento assíncrono para arquivos grandes
   const handleFileUpload = useCallback((file) => {
@@ -89,7 +90,17 @@ function App() {
     if (file) {
       handleFileUpload(file);
     }
+    // Reset input para permitir re-upload do mesmo arquivo
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   }, [handleFileUpload]);
+
+  const handleClickUpload = useCallback(() => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }, []);
 
   // Mapeamento
   const handleMapeamentoChange = useCallback((campoDestino, campoOrigem) => {
@@ -165,124 +176,122 @@ function App() {
     setProcessando(true);
     setProgresso(0);
     
-    // Usar requestAnimationFrame para processamento em chunks sem travar
-    const total = dadosMapeados.length;
-    const chunkSize = 500; // Processa 500 registros por vez
-    let currentIndex = 0;
-    const dadosProcessadosNovo = [];
-    
-    const processChunk = () => {
-      const startTime = performance.now();
-      const chunkEnd = Math.min(currentIndex + chunkSize, total);
+    // Usar setTimeout para garantir que a UI atualize antes de começar
+    setTimeout(() => {
+      // Processamento em chunks assíncronos para não travar o navegador
+      const total = dadosMapeados.length;
+      const chunkSize = 1000; // Aumentado para 1000 registros por vez (mais eficiente)
+      let currentIndex = 0;
+      const dadosProcessadosNovo = [];
       
-      // Filtrar e processar chunk atual
-      for (let i = currentIndex; i < chunkEnd; i++) {
-        const row = dadosMapeados[i];
-        const codigo = String(row['Cód Cliente'] || '').trim();
+      const processChunk = () => {
+        const startTime = performance.now();
+        const chunkEnd = Math.min(currentIndex + chunkSize, total);
         
-        if (codigo === '') continue;
+        // Filtrar e processar chunk atual
+        for (let i = currentIndex; i < chunkEnd; i++) {
+          const row = dadosMapeados[i];
+          const codigo = String(row['Cód Cliente'] || '').trim();
+          
+          if (codigo === '') continue;
+          
+          const tel1 = separarTelefone(row['Numero Tel'] || row['DDD'] || '');
+          const tel2 = separarTelefone(row['Numero_2'] || row['DDD_2'] || '');
+
+          const registro = {
+            'Cód Cliente': codigo,
+            'Nome': normalizarTexto(row['Nome']) || configPadrao['Nome'] || '',
+            'Nome Fantasia': normalizarTexto(row['Nome Fantasia']) || configPadrao['Nome Fantasia'] || '',
+            'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']) || configPadrao['Tipo de Pessoa'] || 'F',
+            'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF']),
+            'Tipo de Inscrição': mapearTipoInscricao(row),
+            'Inscrição': row['Inscrição'] || '',
+            'Segmento': row['Segmento'] || configPadrao['Segmento'] || 'CL',
+            'Cód Grupo de Cliente': row['Cód Grupo de Cliente'] || configPadrao['Cód Grupo de Cliente'] || '',
+            'Data de Cadastro': parseData(row['Data de Cadastro']) || parseData(new Date()) || '01/01/2024',
+            'Data da 1ª compra': parseData(row['Data da 1ª compra']) || '',
+            'Data Ult Compra': parseData(row['Data Ult Compra']) || '',
+            'Limite de Crédito': row['Limite de Crédito'] || '',
+            'Cód Tab Preço': row['Cód Tab Preço'] || configPadrao['Cód Tab Preço'] || 'PADRAO',
+            'Form De Pgto': row['Form De Pgto'] || configPadrao['Form De Pgto'] || 'DP',
+            'Condição De Pgto': row['Condição De Pgto'] || configPadrao['Condição De Pgto'] || '1',
+            'Email': row['Email'] || '',
+            'Site': row['Site'] || '',
+            'Cód Rota': row['Cód Rota'] || configPadrao['Cód Rota'] || '',
+            'Banco': row['Banco'] || configPadrao['Banco'] || '',
+            'Agência': row['Agência'] || configPadrao['Agência'] || '',
+            'Conta': row['Conta'] || configPadrao['Conta'] || '',
+            'Cód Tipo tributação': row['Cód Tipo tributação'] || configPadrao['Cód Tipo tributação'] || '1',
+            'Endereco': row['Endereco'] || '',
+            'Bairro': row['Bairro'] || '',
+            'Municipio': row['Municipio'] || '',
+            'Cep': limparCep(row['Cep']),
+            'Estado': row['Estado'] || '',
+            'Numero': row['Numero'] || '',
+            'Complemento': row['Complemento'] || '',
+            'DDD': tel1.ddd,
+            'Numero Tel': tel1.numero,
+            'Nome Contato': row['Nome Contato'] || '',
+            'Cargo': row['Cargo'] || configPadrao['Cargo'] || '',
+            'Email Contato': row['Email Contato'] || '',
+            'DDD_2': tel2.ddd,
+            'Numero_2': tel2.numero,
+            'Cód Vendedor': row['Cód Vendedor'] || configPadrao['Cód Vendedor'] || 'PATRICKK',
+            'Ativo': mapearAtivo(row['Ativo']) !== undefined ? mapearAtivo(row['Ativo']) : 1
+          };
+
+          dadosProcessadosNovo.push(registro);
+        }
         
-        const tel1 = separarTelefone(row['Numero Tel'] || row['DDD'] || '');
-        const tel2 = separarTelefone(row['Numero_2'] || row['DDD_2'] || '');
-
-        const registro = {
-          'Cód Cliente': codigo,
-          'Nome': normalizarTexto(row['Nome']) || configPadrao['Nome'] || '',
-          'Nome Fantasia': normalizarTexto(row['Nome Fantasia']) || configPadrao['Nome Fantasia'] || '',
-          'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']) || configPadrao['Tipo de Pessoa'] || 'F',
-          'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF']),
-          'Tipo de Inscrição': mapearTipoInscricao(row),
-          'Inscrição': row['Inscrição'] || '',
-          'Segmento': row['Segmento'] || configPadrao['Segmento'] || 'CL',
-          'Cód Grupo de Cliente': row['Cód Grupo de Cliente'] || configPadrao['Cód Grupo de Cliente'] || '',
-          'Data de Cadastro': parseData(row['Data de Cadastro']) || parseData(new Date()) || '01/01/2024',
-          'Data da 1ª compra': parseData(row['Data da 1ª compra']) || '',
-          'Data Ult Compra': parseData(row['Data Ult Compra']) || '',
-          'Limite de Crédito': row['Limite de Crédito'] || '',
-          'Cód Tab Preço': row['Cód Tab Preço'] || configPadrao['Cód Tab Preço'] || 'PADRAO',
-          'Form De Pgto': row['Form De Pgto'] || configPadrao['Form De Pgto'] || 'DP',
-          'Condição De Pgto': row['Condição De Pgto'] || configPadrao['Condição De Pgto'] || '1',
-          'Email': row['Email'] || '',
-          'Site': row['Site'] || '',
-          'Cód Rota': row['Cód Rota'] || configPadrao['Cód Rota'] || '',
-          'Banco': row['Banco'] || configPadrao['Banco'] || '',
-          'Agência': row['Agência'] || configPadrao['Agência'] || '',
-          'Conta': row['Conta'] || configPadrao['Conta'] || '',
-          'Cód Tipo tributação': row['Cód Tipo tributação'] || configPadrao['Cód Tipo tributação'] || '1',
-          'Endereco': row['Endereco'] || '',
-          'Bairro': row['Bairro'] || '',
-          'Municipio': row['Municipio'] || '',
-          'Cep': limparCep(row['Cep']),
-          'Estado': row['Estado'] || '',
-          'Numero': row['Numero'] || '',
-          'Complemento': row['Complemento'] || '',
-          'DDD': tel1.ddd,
-          'Numero Tel': tel1.numero,
-          'Nome Contato': row['Nome Contato'] || '',
-          'Cargo': row['Cargo'] || configPadrao['Cargo'] || '',
-          'Email Contato': row['Email Contato'] || '',
-          'DDD_2': tel2.ddd,
-          'Numero_2': tel2.numero,
-          'Cód Vendedor': row['Cód Vendedor'] || configPadrao['Cód Vendedor'] || 'PATRICKK',
-          'Ativo': mapearAtivo(row['Ativo']) !== undefined ? mapearAtivo(row['Ativo']) : 1
-        };
-
-        dadosProcessadosNovo.push(registro);
-      }
-      
-      currentIndex = chunkEnd;
-      setProgresso(Math.round((currentIndex / total) * 100));
-      
-      // Verifica tempo de processamento do chunk
-      const elapsed = performance.now() - startTime;
-      
-      if (currentIndex < total) {
-        // Se processou rápido (< 50ms), continua imediatamente
-        // Caso contrário, dá uma pequena pausa
-        if (elapsed < 50) {
-          requestAnimationFrame(processChunk);
+        currentIndex = chunkEnd;
+        setProgresso(Math.round((currentIndex / total) * 100));
+        
+        // Verifica tempo de processamento do chunk
+        const elapsed = performance.now() - startTime;
+        
+        if (currentIndex < total) {
+          // Sempre usa setTimeout para dar controle ao event loop
+          setTimeout(processChunk, 0);
         } else {
-          setTimeout(processChunk, 10);
-        }
-      } else {
-        // Finalização: ordenar e remover duplicatas
-        const ordenados = [...dadosProcessadosNovo].sort((a, b) => {
-          const ca = String(a['Cód Cliente'] || '').padStart(10, '0');
-          const cb = String(b['Cód Cliente'] || '').padStart(10, '0');
-          return ca.localeCompare(cb);
-        });
+          // Finalização: ordenar e remover duplicatas
+          const ordenados = [...dadosProcessadosNovo].sort((a, b) => {
+            const ca = String(a['Cód Cliente'] || '').padStart(10, '0');
+            const cb = String(b['Cód Cliente'] || '').padStart(10, '0');
+            return ca.localeCompare(cb);
+          });
 
-        const vistos = new Map();
-        const unicos = [];
+          const vistos = new Map();
+          const unicos = [];
 
-        for (let i = 0; i < ordenados.length; i++) {
-          const row = ordenados[i];
-          const cnpj = limparCnpjCpf(row['CNPJ/CPF']);
-          const nome = normalizarTexto(row['Nome']);
-          const fantasia = normalizarTexto(row['Nome Fantasia']);
-          const chave = `${cnpj}-${nome}-${fantasia}`;
+          for (let i = 0; i < ordenados.length; i++) {
+            const row = ordenados[i];
+            const cnpj = limparCnpjCpf(row['CNPJ/CPF']);
+            const nome = normalizarTexto(row['Nome']);
+            const fantasia = normalizarTexto(row['Nome Fantasia']);
+            const chave = `${cnpj}-${nome}-${fantasia}`;
 
-          if (!vistos.has(chave)) {
-            vistos.set(chave, i);
-            unicos.push(row);
+            if (!vistos.has(chave)) {
+              vistos.set(chave, i);
+              unicos.push(row);
+            }
           }
-        }
 
-        setDadosProcessados(unicos);
-        setStep(5);
-        setProcessando(false);
-        
-        const novaAlteracao = {
-          timestamp: new Date().toISOString(),
-          mensagem: `Processamento concluído: ${unicos.length} registros`,
-          tipo: 'success'
-        };
-        setLogAlteracoes(prev => [...prev, novaAlteracao]);
-      }
-    };
-    
-    // Inicia processamento após renderização
-    requestAnimationFrame(processChunk);
+          setDadosProcessados(unicos);
+          setStep(5);
+          setProcessando(false);
+          
+          const novaAlteracao = {
+            timestamp: new Date().toISOString(),
+            mensagem: `Processamento concluído: ${unicos.length} registros`,
+            tipo: 'success'
+          };
+          setLogAlteracoes(prev => [...prev, novaAlteracao]);
+        }
+      };
+      
+      // Inicia processamento após renderização
+      requestAnimationFrame(processChunk);
+    }, 100);
   }, [dadosMapeados, configPadrao]);
 
   // Atualização de campos
@@ -402,6 +411,7 @@ function App() {
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
+            onClick={handleClickUpload}
           >
             <div className="upload-icon">📁</div>
             <p><strong>Clique aqui</strong> ou arraste sua planilha</p>
@@ -409,8 +419,10 @@ function App() {
             <input 
               type="file" 
               id="fileInput" 
+              ref={fileInputRef}
               accept=".xlsx,.xls"
               onChange={handleFileInput}
+              style={{ display: 'none' }}
             />
           </div>
         </div>
