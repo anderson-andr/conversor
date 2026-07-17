@@ -17,11 +17,6 @@ import {
 
 function App() {
   const [step, setStep] = useState(1);
-  const [dadosOriginais, setDadosOriginais] = useState([]);
-  const [camposOrigem, setCamposOrigem] = useState([]);
-  const [dadosMapeados, setDadosMapeados] = useState([]);
-  const [dadosProcessados, setDadosProcessados] = useState([]);
-  const [mapeamentoAtual, setMapeamentoAtual] = useState({});
   const [configPadrao, setConfigPadrao] = useState({
     segmento: 'CL',
     tabPreco: 'PADRAO',
@@ -35,16 +30,25 @@ function App() {
   const [processando, setProcessando] = useState(false);
   const fileInputRef = useRef(null);
   
+  // REFS PARA DADOS MASSIVOS (evita re-renders)
+  const dadosOriginaisRef = useRef([]);
+  const camposOrigemRef = useRef([]);
+  const dadosMapeadosRef = useRef([]);
+  const dadosProcessadosRef = useRef([]);
+  const duplicadosRef = useRef([]);
+  const mapeamentoAtualRef = useRef({});
+  
   // PAGINAÇÃO
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [tamanhoPagina, setTamanhoPagina] = useState(100);
   const [totalPaginas, setTotalPaginas] = useState(1);
+  const [dadosFiltradosCount, setDadosFiltradosCount] = useState(0);
   
-  // ESTADOS ADICIONAIS
-  const [alteracoesDetalhadas, setAlteracoesDetalhadas] = useState([]);
+  // ESTADOS LEVES PARA UI
   const [logAlteracoes, setLogAlteracoes] = useState([]);
   const [filtroAtivo, setFiltroAtivo] = useState('todos');
   const [progresso, setProgresso] = useState(0);
+  const [stats, setStats] = useState({ total: 0, validos: 0, duplicados: 0 });
 
   // Upload de arquivo com processamento assíncrono para arquivos grandes
   const handleFileUpload = useCallback((file) => {
@@ -62,10 +66,10 @@ function App() {
           const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
           
           console.log(`Arquivo carregado: ${jsonData.length} linhas`);
-          setDadosOriginais(jsonData);
+          dadosOriginaisRef.current = jsonData;
           if (jsonData.length > 0) {
             const campos = Object.keys(jsonData[0]);
-            setCamposOrigem(campos);
+            camposOrigemRef.current = campos;
           }
           setStep(2);
         }, 50);
