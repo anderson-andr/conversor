@@ -329,7 +329,7 @@ function App() {
       // Inicia processamento após renderização
       requestAnimationFrame(processChunk);
     }, 100);
-  }, [dadosMapeados, configPadrao]);
+  }, [configPadrao]);
 
   // Atualização de campos
   const atualizarCampo = useCallback((idx, campo, valor) => {
