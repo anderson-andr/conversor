@@ -1,9 +1,22 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import XLSX from 'xlsx';
 import './App.css';
-import { camposDestino, camposConfiguraveis, regrasMapeamento } from './data/campos';
 import {
-  apenasDigitos,
+  camposDestino as camposDestinoClientes,
+  camposConfiguraveis as camposConfiguraveisClientes,
+  regrasMapeamento as regrasMapeamentoClientes
+} from './data/campos';
+import {
+  camposDestinoFornecedores,
+  camposConfiguraveisFornecedores,
+  regrasMapeamentoFornecedores
+} from './data/fornecedores';
+import {
+  camposDestinoProdutos,
+  camposConfiguraveisProdutos,
+  regrasMapeamentoProdutos
+} from './data/produtos';
+import {
   limparCnpjCpf,
   limparCep,
   separarTelefone,
@@ -16,15 +29,9 @@ import {
 } from './utils/helpers';
 
 function App() {
-  const [step, setStep] = useState(1);
-  const [configPadrao, setConfigPadrao] = useState({
-    segmento: 'CL',
-    tabPreco: 'PADRAO',
-    formPgto: 'DP',
-    condPgto: '1',
-    vendedor: 'PATRICKK',
-    tributacao: '1'
-  });
+  const [step, setStep] = useState(0);
+  const [tipoCadastro, setTipoCadastro] = useState(null);
+  const [configPadrao, setConfigPadrao] = useState({});
   const [activeTab, setActiveTab] = useState('clientes');
   const [searchTerm, setSearchTerm] = useState('');
   const [processando, setProcessando] = useState(false);
@@ -36,20 +43,56 @@ function App() {
   const dadosMapeadosRef = useRef([]);
   const dadosProcessadosRef = useRef([]);
   const duplicadosRef = useRef([]);
-  const mapeamentoAtualRef = useRef({});
+  // O mapeamento precisa ser estado: cada alteração deve atualizar os selects e os indicadores da tela.
+  const [mapeamentoAtual, setMapeamentoAtual] = useState({});
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [paginaDuplicados, setPaginaDuplicados] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(100);
   
   // PAGINAÇÃO
-  const [paginaAtual, setPaginaAtual] = useState(1);
-  const [tamanhoPagina, setTamanhoPagina] = useState(100);
-  const [totalPaginas, setTotalPaginas] = useState(1);
-  const [dadosFiltradosCount, setDadosFiltradosCount] = useState(0);
   
   // ESTADOS LEVES PARA UI
   const [logAlteracoes, setLogAlteracoes] = useState([]);
   const [alteracoesDetalhadas, setAlteracoesDetalhadas] = useState([]);
   const [filtroAtivo, setFiltroAtivo] = useState('todos');
   const [progresso, setProgresso] = useState(0);
-  const [stats, setStats] = useState({ total: 0, validos: 0, duplicados: 0 });
+
+  const ehFornecedor = tipoCadastro === 'fornecedor';
+  const ehProduto = tipoCadastro === 'produto';
+  const camposDestino = ehProduto ? camposDestinoProdutos : ehFornecedor ? camposDestinoFornecedores : camposDestinoClientes;
+  const camposConfiguraveis = ehProduto ? camposConfiguraveisProdutos : ehFornecedor ? camposConfiguraveisFornecedores : camposConfiguraveisClientes;
+  const regrasMapeamento = ehProduto ? regrasMapeamentoProdutos : ehFornecedor ? regrasMapeamentoFornecedores : regrasMapeamentoClientes;
+  const campoCodigo = ehProduto ? 'Cod Produto' : ehFornecedor ? 'Cód Fornec' : 'Cód Cliente';
+  const campoDuplicidade = ehProduto ? 'Cod Produto' : 'CNPJ/CPF';
+  const nomeCadastro = ehProduto ? 'produto' : ehFornecedor ? 'fornecedor' : 'cliente';
+
+  const selecionarTipoCadastro = useCallback((tipo) => {
+    setTipoCadastro(tipo);
+    setStep(1);
+  }, []);
+
+  const voltarSelecaoTipo = useCallback(() => {
+    const possuiDados = dadosOriginaisRef.current.length > 0 || dadosProcessadosRef.current.length > 0;
+    if (possuiDados && !window.confirm('Ao alterar o tipo de importação, os dados atuais serão descartados. Deseja continuar?')) {
+      return;
+    }
+
+    dadosOriginaisRef.current = [];
+    camposOrigemRef.current = [];
+    dadosMapeadosRef.current = [];
+    dadosProcessadosRef.current = [];
+    duplicadosRef.current = [];
+    setTipoCadastro(null);
+    setStep(0);
+    setMapeamentoAtual({});
+    setConfigPadrao({});
+    setSearchTerm('');
+    setFiltroAtivo('todos');
+    setAlteracoesDetalhadas([]);
+    setLogAlteracoes([]);
+    setPaginaAtual(1);
+    setPaginaDuplicados(1);
+  }, []);
 
   // Upload de arquivo com processamento assíncrono para arquivos grandes
   const handleFileUpload = useCallback((file) => {
@@ -138,13 +181,20 @@ function App() {
       }
     });
     setMapeamentoAtual(novoMapeamento);
-  }, []);
+  }, [camposDestino, regrasMapeamento]);
 
   const resetarMapeamento = useCallback(() => {
     setMapeamentoAtual({});
   }, []);
 
   const aplicarMapeamento = useCallback(() => {
+    if (processando) return;
+
+    if (!mapeamentoAtual[campoCodigo]) {
+      alert(`Mapeie o campo obrigatório "${campoCodigo}" antes de continuar. Sem ele não é possível identificar os registros.`);
+      return;
+    }
+
     const obrigatoriosNaoMapeados = camposDestino.filter(
       c => c.obrigatorio && !mapeamentoAtual[c.nome]
     );
@@ -158,7 +208,9 @@ function App() {
 
     // Mapeia apenas os campos que foram explicitamente selecionados
     // Campos não mapeados permanecem sem valor para serem preenchidos com defaults depois
-    const dadosMapeadosNovo = dadosOriginais.map(row => {
+    const dadosOriginais = dadosOriginaisRef.current;
+    const dadosMapeadosNovo = new Array(dadosOriginais.length);
+    const mapearLinha = row => {
       const newRow = {};
       camposDestino.forEach(campo => {
         const campoOrigem = mapeamentoAtual[campo.nome];
@@ -169,11 +221,34 @@ function App() {
         // Se não mapeado, o campo fica undefined (será tratado com defaults na etapa 4)
       });
       return newRow;
-    });
+    };
 
-    setDadosMapeados(dadosMapeadosNovo);
-    setStep(3);
-  }, []);
+    const tamanhoLote = 500;
+    let indiceAtual = 0;
+    setProcessando(true);
+    setProgresso(0);
+
+    const mapearLote = () => {
+      const fim = Math.min(indiceAtual + tamanhoLote, dadosOriginais.length);
+      for (let i = indiceAtual; i < fim; i++) {
+        dadosMapeadosNovo[i] = mapearLinha(dadosOriginais[i]);
+      }
+
+      indiceAtual = fim;
+      setProgresso(dadosOriginais.length ? Math.round((indiceAtual / dadosOriginais.length) * 100) : 100);
+
+      if (indiceAtual < dadosOriginais.length) {
+        setTimeout(mapearLote, 0);
+        return;
+      }
+
+      dadosMapeadosRef.current = dadosMapeadosNovo;
+      setProcessando(false);
+      setStep(3);
+    };
+
+    requestAnimationFrame(mapearLote);
+  }, [campoCodigo, camposDestino, mapeamentoAtual, processando]);
 
   const voltarMapeamento = useCallback(() => {
     setStep(2);
@@ -198,26 +273,26 @@ function App() {
     // Usar setTimeout para garantir que a UI atualize antes de começar
     setTimeout(() => {
       // Processamento em chunks assíncronos para não travar o navegador
-      const total = dadosMapeados.length;
+      const dadosParaProcessar = dadosMapeadosRef.current;
+      const total = dadosParaProcessar.length;
       const chunkSize = 1000; // Aumentado para 1000 registros por vez (mais eficiente)
       let currentIndex = 0;
-      const dadosMapeados = [];
+      const dadosProcessadosNovo = [];
       
       const processChunk = () => {
-        const startTime = performance.now();
         const chunkEnd = Math.min(currentIndex + chunkSize, total);
         
         // Filtrar e processar chunk atual
         for (let i = currentIndex; i < chunkEnd; i++) {
-          const row = dadosMapeados[i];
-          const codigo = String(row['Cód Cliente'] || '').trim();
+          const row = dadosParaProcessar[i];
+          const codigo = String(row[campoCodigo] || '').trim();
           
           if (codigo === '') continue;
           
           const tel1 = separarTelefone(row['Numero Tel'] || row['DDD'] || '');
           const tel2 = separarTelefone(row['Numero_2'] || row['DDD_2'] || '');
 
-          const registro = {
+          let registro = {
             'Cód Cliente': codigo,
             'Nome': normalizarTexto(row['Nome']) || configPadrao['Nome'] || '',
             'Nome Fantasia': normalizarTexto(row['Nome Fantasia']) || configPadrao['Nome Fantasia'] || '',
@@ -259,23 +334,89 @@ function App() {
             'Ativo': mapearAtivo(row['Ativo']) !== undefined ? mapearAtivo(row['Ativo']) : 1
           };
 
-          dadosMapeados.push(registro);
+          if (ehFornecedor) {
+            const telefone = separarTelefone(row['Telefone'] || '');
+            const telefone2 = separarTelefone(row['Telefone 2'] || '');
+
+            registro = {
+              'Cód Fornec': codigo,
+              'Tipo': row['Tipo'] || configPadrao['Tipo'] || '',
+              'Segmento (4)': row['Segmento (4)'] || configPadrao['Segmento (4)'] || '',
+              'Nome': normalizarTexto(row['Nome']),
+              'Nome Fantasia': normalizarTexto(row['Nome Fantasia']),
+              'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']),
+              'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF']),
+              'Tipo de Inscrição': row['Tipo de Inscrição'] !== undefined ? mapearTipoInscricao(row) : '',
+              'Inscrição': row['Inscrição'] || '',
+              'Conta Contábil': row['Conta Contábil'] || configPadrao['Conta Contábil'] || '',
+              'Data de Cadastro': parseData(row['Data de Cadastro']),
+              'Email': row['Email'] || '',
+              'Endereço': row['Endereço'] || '',
+              'Bairro': row['Bairro'] || '',
+              'Municipio': row['Municipio'] || '',
+              'Cep': limparCep(row['Cep']),
+              'Estado': row['Estado'] || '',
+              'Numero': row['Numero'] || '',
+              'Complemento': row['Complemento'] || '',
+              'DDD': row['DDD'] || telefone.ddd,
+              'Telefone': telefone.numero || row['Telefone'] || '',
+              'DDD 2': row['DDD 2'] || telefone2.ddd,
+              'Telefone 2': telefone2.numero || row['Telefone 2'] || '',
+              'Nome Contato': row['Nome Contato'] || '',
+              'Site': row['Site'] || '',
+              'Cargo': row['Cargo'] || configPadrao['Cargo'] || '',
+              'Email Contato': row['Email Contato'] || '',
+              'Ativo': row['Ativo'] !== undefined ? mapearAtivo(row['Ativo']) : ''
+            };
+          }
+
+          if (ehProduto) {
+            registro = Object.fromEntries(
+              camposDestinoProdutos.map(({ nome }) => [nome, row[nome] || configPadrao[nome] || ''])
+            );
+            registro['Cod Produto'] = codigo;
+            registro['Descrição'] = normalizarTexto(row['Descrição']);
+            registro['Desc Resumida'] = normalizarTexto(row['Desc Resumida']);
+            registro['Data Cadastro'] = parseData(row['Data Cadastro']);
+            registro['Ativo'] = row['Ativo'] !== undefined
+              ? mapearAtivo(row['Ativo'])
+              : configPadrao['Ativo'] !== undefined ? mapearAtivo(configPadrao['Ativo']) : '';
+          }
+
+          // Valores automáticos não devem preencher campos que não vieram do arquivo
+          // nem receberam um valor informado manualmente na etapa de configuração.
+          camposDestino.forEach(({ nome }) => {
+            const valorMapeado = row[nome];
+            const valorManual = configPadrao[nome];
+            const possuiValorMapeado = valorMapeado !== undefined && valorMapeado !== null && valorMapeado !== '';
+            const possuiValorManual = valorManual !== undefined && valorManual !== null && valorManual !== '';
+
+            if (!possuiValorMapeado && !possuiValorManual) {
+              registro[nome] = '';
+            }
+          });
+
+          const enderecoPreenchido = String(registro['Endereco'] || registro['Endereço'] || '').trim() !== '';
+          if (enderecoPreenchido && String(registro['Numero'] || '').trim() === '') {
+            registro['Numero'] = 'S/N';
+          }
+
+          dadosProcessadosNovo.push(registro);
         }
         
         currentIndex = chunkEnd;
         setProgresso(Math.round((currentIndex / total) * 100));
         
         // Verifica tempo de processamento do chunk
-        const elapsed = performance.now() - startTime;
         
         if (currentIndex < total) {
           // Sempre usa setTimeout para dar controle ao event loop
           setTimeout(processChunk, 0);
         } else {
           // Finalização: ordenar e remover duplicatas (CNPJ igual mantém menor código)
-          const ordenados = [...dadosMapeados].sort((a, b) => {
-            const ca = String(a['Cód Cliente'] || '').padStart(10, '0');
-            const cb = String(b['Cód Cliente'] || '').padStart(10, '0');
+          const ordenados = [...dadosProcessadosNovo].sort((a, b) => {
+            const ca = String(a[campoCodigo] || '').padStart(10, '0');
+            const cb = String(b[campoCodigo] || '').padStart(10, '0');
             return ca.localeCompare(cb);
           });
 
@@ -285,14 +426,13 @@ function App() {
 
           for (let i = 0; i < ordenados.length; i++) {
             const row = ordenados[i];
-            const cnpj = limparCnpjCpf(row['CNPJ/CPF']);
-            
-            // Usa apenas CNPJ como chave para duplicidade
-            const chave = cnpj;
+            const chave = ehProduto
+              ? String(row[campoDuplicidade] || '').trim()
+              : limparCnpjCpf(row['CNPJ/CPF']);
             
             if (!vistos.has(chave)) {
               // Primeiro registro com este CNPJ (menor código pois está ordenado)
-              vistos.set(chave, row['Cód Cliente']);
+              vistos.set(chave, row[campoCodigo]);
               unicos.push(row);
             } else {
               // Duplicado - armazena info do duplicado
@@ -304,8 +444,17 @@ function App() {
             }
           }
 
-          setDadosProcessados(unicos);
-          setDuplicados(listaDuplicados);
+          if (unicos.length === 0) {
+            setProcessando(false);
+            setStep(2);
+            alert(`Nenhum ${nomeCadastro} válido foi encontrado. Verifique o mapeamento do campo "${campoCodigo}" e se a planilha possui valores nesse campo.`);
+            return;
+          }
+
+          dadosProcessadosRef.current = unicos;
+          duplicadosRef.current = listaDuplicados;
+          setPaginaAtual(1);
+          setPaginaDuplicados(1);
           setStep(5);
           setProcessando(false);
           
@@ -329,12 +478,11 @@ function App() {
       // Inicia processamento após renderização
       requestAnimationFrame(processChunk);
     }, 100);
-  }, [configPadrao]);
+  }, [campoCodigo, campoDuplicidade, camposDestino, configPadrao, ehFornecedor, ehProduto, nomeCadastro]);
 
   // Atualização de campos
   const atualizarCampo = useCallback((idx, campo, valor) => {
-    setDadosProcessados(prev => {
-      const novosDados = [...prev];
+      const novosDados = [...dadosProcessadosRef.current];
       const valorAnterior = novosDados[idx][campo];
       
       if (valorAnterior !== valor) {
@@ -361,19 +509,26 @@ function App() {
         ]);
       }
       
-      return novosDados;
-    });
+      dadosProcessadosRef.current = novosDados;
   }, []);
 
   // Exportação
   const exportarExcel = useCallback(() => {
-    const ws = XLSX.utils.json_to_sheet(dadosProcessadosRef.current);
+    const camposModelo = (ehFornecedor ? camposDestinoFornecedores : camposDestinoProdutos).map(({ nome }) => nome);
+    const ws = (ehFornecedor || ehProduto)
+      ? XLSX.utils.json_to_sheet(dadosProcessadosRef.current, { header: camposModelo, skipHeader: true, origin: 'A2' })
+      : XLSX.utils.json_to_sheet(dadosProcessadosRef.current);
+
+    if (ehFornecedor || ehProduto) {
+      const cabecalhosModelo = camposModelo.map(campo => ehFornecedor && campo === 'Email Contato' ? 'Email' : campo);
+      XLSX.utils.sheet_add_aoa(ws, [cabecalhosModelo], { origin: 'A1' });
+    }
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+    XLSX.utils.book_append_sheet(wb, ws, ehProduto ? 'Produtos' : ehFornecedor ? 'Fornecedores' : 'Clientes');
     
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    XLSX.writeFile(wb, `CLIENTES_IMPORT_${timestamp}.xlsx`);
-  }, [dadosProcessadosRef.current]);
+    XLSX.writeFile(wb, `${ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES'}_IMPORT_${timestamp}.xls`, { bookType: 'biff8' });
+  }, [ehFornecedor, ehProduto]);
 
   const exportarApenasAlteracoes = useCallback(() => {
     const indicesAlterados = [...new Set(alteracoesDetalhadas.map(a => a.idx))];
@@ -383,8 +538,19 @@ function App() {
     const ws = XLSX.utils.json_to_sheet(dadosAlterados);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Alterados');
-    XLSX.writeFile(wb, `CLIENTES_SOMENTE_ALTERADOS_${timestamp}.xlsx`);
-  }, [dadosProcessadosRef.current, alteracoesDetalhadas]);
+    XLSX.writeFile(wb, `CLIENTES_SOMENTE_ALTERADOS_${timestamp}.xls`, { bookType: 'biff8' });
+  }, [alteracoesDetalhadas]);
+
+  const exportarDuplicados = useCallback(() => {
+    if (duplicadosRef.current.length === 0) return;
+
+    const ws = XLSX.utils.json_to_sheet(duplicadosRef.current);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Duplicados');
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    XLSX.writeFile(wb, `${ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES'}_DUPLICADOS_${timestamp}.xls`, { bookType: 'biff8' });
+  }, [ehFornecedor, ehProduto]);
 
   const descartarAlteracoes = useCallback(() => {
     if (window.confirm('Deseja realmente descartar todas as alterações feitas?')) {
@@ -395,11 +561,15 @@ function App() {
 
   const resetar = useCallback(() => {
     if (window.confirm('Deseja realmente resetar todo o processo?')) {
-      setStep(1);
-      setDadosOriginais([]);
-      setCamposOrigem([]);
-      setDadosMapeados([]);
-      setDadosProcessados([]);
+      setStep(0);
+      setTipoCadastro(null);
+      setPaginaAtual(1);
+      setPaginaDuplicados(1);
+      dadosOriginaisRef.current = [];
+      camposOrigemRef.current = [];
+      dadosMapeadosRef.current = [];
+      dadosProcessadosRef.current = [];
+      duplicadosRef.current = [];
       setMapeamentoAtual({});
       setConfigPadrao({});
       setAlteracoesDetalhadas([]);
@@ -417,10 +587,11 @@ function App() {
   } : null;
 
   // Filtros
-  const dadosFiltrados = dadosProcessadosRef.current.filter((row, idx) => {
+  const indicesAlterados = new Set(alteracoesDetalhadas.map(a => a.idx));
+  const dadosFiltrados = dadosProcessadosRef.current.reduce((linhas, row, idx) => {
     const texto = Object.values(row).join(' ').toLowerCase();
     const ativo = String(row['Ativo']);
-    const foiAlterada = alteracoesDetalhadas.some(a => a.idx === idx);
+    const foiAlterada = indicesAlterados.has(idx);
     
     const matchBusca = !searchTerm || texto.includes(searchTerm.toLowerCase());
     const matchAtivo = filtroAtivo === 'todos' || 
@@ -428,19 +599,90 @@ function App() {
                        (filtroAtivo === 'inativos' && ativo === '0') ||
                        (filtroAtivo === 'alterados' && foiAlterada);
     
-    return matchBusca && matchAtivo;
-  });
+    if (matchBusca && matchAtivo) {
+      linhas.push({ row, idx });
+    }
+    return linhas;
+  }, []);
+
+  const totalPaginas = Math.max(1, Math.ceil(dadosFiltrados.length / tamanhoPagina));
+  const paginaSegura = Math.min(paginaAtual, totalPaginas);
+  const inicioPagina = (paginaSegura - 1) * tamanhoPagina;
+  const dadosPagina = dadosFiltrados.slice(inicioPagina, inicioPagina + tamanhoPagina);
+  const totalPaginasDuplicados = Math.max(1, Math.ceil(duplicadosRef.current.length / tamanhoPagina));
+  const paginaDuplicadosSegura = Math.min(paginaDuplicados, totalPaginasDuplicados);
+  const inicioPaginaDuplicados = (paginaDuplicadosSegura - 1) * tamanhoPagina;
+  const duplicadosPagina = duplicadosRef.current.slice(
+    inicioPaginaDuplicados,
+    inicioPaginaDuplicados + tamanhoPagina
+  );
 
   return (
     <div className="container">
       <header>
-        <h1>📋 Importação de Clientes - Com Mapeamento De/Para</h1>
-        <p>Importe planilhas de qualquer estrutura e mapeie os campos da planilha de origem para os campos do Target3</p>
+        <h1>📋 Importação de {tipoCadastro ? (ehProduto ? 'Produtos' : ehFornecedor ? 'Fornecedores' : 'Clientes') : 'Cadastros'}</h1>
+        <p>Importe uma planilha, mapeie os campos de origem e gere o arquivo no modelo correspondente.</p>
       </header>
 
+      {step > 0 && (
+        <div className="acoes-topo">
+          <button type="button" className="btn btn-secondary" onClick={voltarSelecaoTipo}>
+            ← Alterar tipo de importação
+          </button>
+        </div>
+      )}
+
+      {step === 0 && (
+        <section className="tipo-cadastro card step-card" aria-labelledby="tipoCadastroTitulo">
+          <h2 id="tipoCadastroTitulo">O que você deseja importar?</h2>
+          <p className="tipo-cadastro-descricao">Escolha o modelo antes de carregar a planilha. Cada opção aplica seus próprios campos, validações e arquivo de saída.</p>
+          <div className="tipo-cadastro-opcoes">
+            <button type="button" className="tipo-cadastro-opcao" onClick={() => selecionarTipoCadastro('cliente')}>
+              <span className="tipo-cadastro-icone">👥</span>
+              <span>Clientes</span>
+              <small>Cadastro de clientes e condições comerciais</small>
+            </button>
+            <button type="button" className="tipo-cadastro-opcao" onClick={() => selecionarTipoCadastro('fornecedor')}>
+              <span className="tipo-cadastro-icone">🏢</span>
+              <span>Fornecedores</span>
+              <small>Modelo com código, conta contábil e dados de contato</small>
+            </button>
+            <button type="button" className="tipo-cadastro-opcao" onClick={() => selecionarTipoCadastro('produto')}>
+              <span className="tipo-cadastro-icone">📦</span>
+              <span>Produtos</span>
+              <small>Cadastro de itens, unidades, fiscal e códigos de barras</small>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step > 0 && (
+      <nav className="stepper" aria-label="Etapas da importação">
+        {['Importar', 'Mapear', 'Revisar', 'Configurar', 'Concluir'].map((titulo, indice) => {
+          const numeroEtapa = indice + 1;
+          const concluida = numeroEtapa < step;
+          const atual = numeroEtapa === step;
+
+          return (
+            <button
+              key={titulo}
+              type="button"
+              className={`stepper-item ${atual ? 'active' : ''} ${concluida ? 'completed' : ''}`}
+              onClick={() => concluida && setStep(numeroEtapa)}
+              disabled={!concluida}
+              aria-current={atual ? 'step' : undefined}
+            >
+              <span className="stepper-number">{concluida ? '✓' : numeroEtapa}</span>
+              <span className="stepper-label">{titulo}</span>
+            </button>
+          );
+        })}
+      </nav>
+      )}
+
       {/* ETAPA 1: Upload */}
-      {step >= 1 && (
-        <div className={`card ${step < 1 ? 'hidden' : ''}`} id="step1">
+      {step === 1 && (
+        <div className="card step-card" id="step1">
           <h2>1️⃣ Importar Planilha de Origem</h2>
           <div 
             className="upload-area" 
@@ -466,8 +708,8 @@ function App() {
       )}
 
       {/* ETAPA 2: Mapeamento De/Para */}
-      {step >= 2 && (
-        <div className={`card ${step < 2 ? 'hidden' : ''}`} id="step2">
+      {step === 2 && (
+        <div className="card step-card" id="step2">
           <h2>2️⃣ Mapeamento De/Para</h2>
           <div className="alert alert-info">
             ℹ️ A listagem abaixo mostra os <strong>campos da planilha de destino (Target3)</strong>. 
@@ -483,8 +725,7 @@ function App() {
           </div>
           <div className="mapeamento-lista" id="mapeamentoLista">
             {camposDestino.map(campo => {
-              const origemDetectada = detectarMapeamentoAutomatico(campo.nome, camposOrigemRef.current, regrasMapeamento);
-              const mapeado = !!(mapeamentoAtualRef.current && mapeamentoAtualRef.current[campo.nome]);
+              const mapeado = !!mapeamentoAtual[campo.nome];
               
               return (
                 <div 
@@ -515,6 +756,14 @@ function App() {
             })}
           </div>
 
+          {processando && (
+            <div className="progress-container" aria-live="polite">
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${progresso}%` }}></div>
+              </div>
+              <div className="progress-text">Preparando dados... {progresso}%</div>
+            </div>
+          )}
           <div className="mapeamento-resumo" id="mapeamentoResumo">
             <div className="mapeamento-resumo-item">
               <span className="dot dot-success"></span>
@@ -539,23 +788,23 @@ function App() {
       )}
 
       {/* ETAPA 3: Preview dos Dados */}
-      {step >= 3 && (
-        <div className={`card ${step < 3 ? 'hidden' : ''}`} id="step3">
+      {step === 3 && (
+        <div className="card step-card" id="step3">
           <h2>3️⃣ Preview dos Dados Mapeados</h2>
           <div className="alert alert-success">
-            ✅ Mapeamento aplicado com sucesso! <strong>{dadosMapeados.length}</strong> registros detectados.
+            ✅ Mapeamento aplicado com sucesso! <strong>{dadosMapeadosRef.current.length}</strong> registros detectados.
           </div>
           <div className="preview-table" id="previewTable">
             <table>
               <thead>
                 <tr>
-                  {Object.keys(dadosMapeados[0] || {}).slice(0, 10).map(campo => (
+                  {Object.keys(dadosMapeadosRef.current[0] || {}).slice(0, 10).map(campo => (
                     <th key={campo}>{campo}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {dadosMapeados.slice(0, 5).map((row, idx) => (
+                {dadosMapeadosRef.current.slice(0, 5).map((row, idx) => (
                   <tr key={idx}>
                     {Object.entries(row).slice(0, 10).map(([campo, valor]) => (
                       <td key={campo}>{String(valor)}</td>
@@ -573,8 +822,8 @@ function App() {
       )}
 
       {/* ETAPA 4: Configuração Padrão */}
-      {step >= 4 && (
-        <div className={`card ${step < 4 ? 'hidden' : ''}`} id="step4">
+      {step === 4 && (
+        <div className="card step-card" id="step4">
           <h2>4️⃣ Configurar Valores Padrão</h2>
           <div className="alert alert-info">
             ℹ️ Preencha apenas os campos que <strong>NÃO foram mapeados</strong> na etapa anterior.
@@ -606,10 +855,11 @@ function App() {
                   {cfg.tipo === 'select' ? (
                     <select
                       id={`default_${cfg.campo.replace(/\s/g, '_')}`}
-                      defaultValue={configPadrao[cfg.campo] || cfg.default}
+                      value={configPadrao[cfg.campo] || ''}
                       onChange={(e) => handleConfigPadraoChange(cfg.campo, e.target.value)}
                       disabled={campoMapeado}
                     >
+                      <option value="">-- Não preencher --</option>
                       {cfg.opcoes?.map(op => (
                         <option key={op.valor} value={op.valor}>{op.texto}</option>
                       ))}
@@ -618,7 +868,7 @@ function App() {
                     <input
                       type="text"
                       id={`default_${cfg.campo.replace(/\s/g, '_')}`}
-                      defaultValue={configPadrao[cfg.campo] || cfg.default}
+                      value={configPadrao[cfg.campo] || ''}
                       onChange={(e) => handleConfigPadraoChange(cfg.campo, e.target.value)}
                       disabled={campoMapeado}
                       placeholder={campoMapeado ? 'Valor virá da planilha' : cfg.placeholder || ''}
@@ -640,6 +890,7 @@ function App() {
           )}
           
           <div className="actions">
+            <button className="btn btn-secondary" onClick={() => setStep(3)}>← Voltar à revisão</button>
             <button 
               className="btn btn-primary" 
               onClick={processarPlanilha}
@@ -652,9 +903,9 @@ function App() {
       )}
 
       {/* ETAPA 5: Estatísticas e Tabela */}
-      {step >= 5 && estatisticas && (
+      {step === 5 && estatisticas && (
         <>
-          <div className={`card ${step < 5 ? 'hidden' : ''}`} id="step5">
+          <div className="card step-card" id="step5">
             <h2>5️⃣ Resumo do Processamento</h2>
             <div className="stats" id="statsContainer">
               <div className="stat-card">
@@ -669,10 +920,12 @@ function App() {
                 <div className="label">Inativos</div>
                 <div className="value">{estatisticas.inativos}</div>
               </div>
-              <div className="stat-card danger">
-                <div className="label">Sem CNPJ/CPF</div>
-                <div className="value">{estatisticas.semCnpj}</div>
-              </div>
+              {!ehProduto && (
+                <div className="stat-card danger">
+                  <div className="label">Sem CNPJ/CPF</div>
+                  <div className="value">{estatisticas.semCnpj}</div>
+                </div>
+              )}
               <div className="stat-card info">
                 <div className="label">Linhas Alteradas</div>
                 <div className="value">{estatisticas.linhasAlteradas}</div>
@@ -710,8 +963,16 @@ function App() {
                 className={`tab ${activeTab === 'clientes' ? 'active' : ''}`}
                 onClick={() => setActiveTab('clientes')}
               >
-                Clientes
+                {ehProduto ? 'Produtos' : ehFornecedor ? 'Fornecedores' : 'Clientes'}
               </div>
+              {duplicadosRef.current.length > 0 && (
+                <div
+                  className={`tab ${activeTab === 'duplicados' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('duplicados')}
+                >
+                  Duplicados ({duplicadosRef.current.length})
+                </div>
+              )}
               <div 
                 className={`tab ${activeTab === 'log' ? 'active' : ''}`}
                 onClick={() => setActiveTab('log')}
@@ -728,12 +989,18 @@ function App() {
                     id="searchInput"
                     placeholder="🔍 Buscar em todos os campos..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setPaginaAtual(1);
+                    }}
                   />
                   <select
                     id="filterAtivo"
                     value={filtroAtivo}
-                    onChange={(e) => setFiltroAtivo(e.target.value)}
+                    onChange={(e) => {
+                      setFiltroAtivo(e.target.value);
+                      setPaginaAtual(1);
+                    }}
                   >
                     <option value="todos">Todos</option>
                     <option value="ativos">Ativos</option>
@@ -752,8 +1019,7 @@ function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {dadosFiltrados.map((row, idxReal) => {
-                        const idx = dadosProcessadosRef.current.indexOf(row);
+                      {dadosPagina.map(({ row, idx }) => {
                         const foiAlterado = alteracoesDetalhadas.some(a => a.idx === idx);
                         
                         return (
@@ -777,6 +1043,99 @@ function App() {
                       })}
                     </tbody>
                   </table>
+                </div>
+                <div className="paginacao" aria-label="Paginação da tabela">
+                  <span className="paginacao-info">
+                    Exibindo {dadosPagina.length ? inicioPagina + 1 : 0}-{inicioPagina + dadosPagina.length} de {dadosFiltrados.length} registros
+                  </span>
+                  <div className="paginacao-controles">
+                    <select
+                      value={tamanhoPagina}
+                      onChange={(e) => {
+                        setTamanhoPagina(Number(e.target.value));
+                        setPaginaAtual(1);
+                      }}
+                      aria-label="Registros por página"
+                    >
+                      <option value={50}>50 por página</option>
+                      <option value={100}>100 por página</option>
+                      <option value={200}>200 por página</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setPaginaAtual(paginaSegura - 1)}
+                      disabled={paginaSegura === 1}
+                    >
+                      Anterior
+                    </button>
+                    <span className="paginacao-pagina">Página {paginaSegura} de {totalPaginas}</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setPaginaAtual(paginaSegura + 1)}
+                      disabled={paginaSegura === totalPaginas}
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {activeTab === 'duplicados' && (
+              <>
+                <div className="alert alert-warning">
+                  Estes registros têm o mesmo CNPJ/CPF de outro cliente e foram removidos da importação principal.
+                </div>
+                <div className="actions">
+                  <button className="btn btn-warning" onClick={exportarDuplicados}>
+                    Exportar somente duplicados
+                  </button>
+                </div>
+                <div className="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        {Object.keys(duplicadosRef.current[0] || {}).map(campo => (
+                          <th key={campo}>{campo}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {duplicadosPagina.map((row, idx) => (
+                        <tr key={`${row['Cód Cliente'] || idx}-${inicioPaginaDuplicados + idx}`}>
+                          {Object.entries(row).map(([campo, valor]) => (
+                            <td key={campo}>{String(valor ?? '')}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="paginacao" aria-label="Paginação dos duplicados">
+                  <span className="paginacao-info">
+                    Exibindo {duplicadosPagina.length ? inicioPaginaDuplicados + 1 : 0}-{inicioPaginaDuplicados + duplicadosPagina.length} de {duplicadosRef.current.length} duplicados
+                  </span>
+                  <div className="paginacao-controles">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setPaginaDuplicados(paginaDuplicadosSegura - 1)}
+                      disabled={paginaDuplicadosSegura === 1}
+                    >
+                      Anterior
+                    </button>
+                    <span className="paginacao-pagina">Página {paginaDuplicadosSegura} de {totalPaginasDuplicados}</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setPaginaDuplicados(paginaDuplicadosSegura + 1)}
+                      disabled={paginaDuplicadosSegura === totalPaginasDuplicados}
+                    >
+                      Próxima
+                    </button>
+                  </div>
                 </div>
               </>
             )}
