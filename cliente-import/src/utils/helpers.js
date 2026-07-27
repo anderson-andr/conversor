@@ -4,20 +4,129 @@ export function apenasDigitos(v) {
     return String(v || '').replace(/\D/g, '');
 }
 
-export function limparCnpjCpf(v) {
-    const d = apenasDigitos(v);
-    return d.slice(0, 14);
+function converterIdentificadorParaTexto(v) {
+    if (typeof v === 'number' && Number.isFinite(v)) {
+        return Math.trunc(v).toFixed(0);
+    }
+
+    const texto = String(v ?? '').trim();
+    if (/^\d+(?:[.,]0+)?$/.test(texto)) {
+        return texto.replace(/[.,]0+$/, '');
+    }
+    if (/^\d+(?:[.,]\d+)?e[+-]?\d+$/i.test(texto)) {
+        const numero = Number(texto.replace(',', '.'));
+        if (Number.isSafeInteger(numero)) return numero.toFixed(0);
+    }
+    return texto;
+}
+
+export function normalizarCodigo(v) {
+    return converterIdentificadorParaTexto(v).replace(/\s/g, '');
+}
+
+export function limparCnpjCpf(v, tipoPessoa = '') {
+    const d = apenasDigitos(converterIdentificadorParaTexto(v)).slice(0, 14);
+    const tipo = String(tipoPessoa || '').trim().toUpperCase();
+
+    if (!d) return '';
+    if (tipo === 'F') return d.slice(-11).padStart(11, '0');
+    if (tipo === 'J') return d.padStart(14, '0');
+    return d.length <= 11 ? d.padStart(11, '0') : d.padStart(14, '0');
+}
+
+export function validarCnpjCpf(v) {
+    const documento = apenasDigitos(v);
+
+    if (![11, 14].includes(documento.length) || /^(\d)\1+$/.test(documento)) {
+        return false;
+    }
+
+    const calcularDigito = (base, pesos) => {
+        const soma = base
+            .split('')
+            .reduce((total, digito, indice) => total + Number(digito) * pesos[indice], 0);
+        const resto = soma % 11;
+        return resto < 2 ? 0 : 11 - resto;
+    };
+
+    if (documento.length === 11) {
+        const primeiro = calcularDigito(documento.slice(0, 9), [10, 9, 8, 7, 6, 5, 4, 3, 2]);
+        const segundo = calcularDigito(documento.slice(0, 10), [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]);
+        return documento.endsWith(`${primeiro}${segundo}`);
+    }
+
+    const primeiro = calcularDigito(documento.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+    const segundo = calcularDigito(documento.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+    return documento.endsWith(`${primeiro}${segundo}`);
 }
 
 export function limparCep(v) {
     return apenasDigitos(v).slice(0, 8);
 }
 
-export function separarTelefone(tel) {
-    const d = apenasDigitos(tel);
+export function separarTelefone(tel, dddAtual = '') {
+    const telefone = apenasDigitos(tel);
+    const dddInformado = apenasDigitos(dddAtual);
+
+    // Quando telefone e DDD vieram da mesma coluna, o telefone completo
+    // prevalece e os dois primeiros dígitos são separados.
+    if (telefone.length >= 10) {
+        return {
+            ddd: telefone.slice(0, 2),
+            numero: telefone.slice(2, 11)
+        };
+    }
+
+    // Se apenas o campo mapeado como DDD contém o telefone completo,
+    // também realiza a separação.
+    if (!telefone && dddInformado.length >= 10) {
+        return {
+            ddd: dddInformado.slice(0, 2),
+            numero: dddInformado.slice(2, 11)
+        };
+    }
+
+    // Preserva um DDD que esteja em uma coluna própria.
+    if (dddInformado.length === 2) {
+        return {
+            ddd: dddInformado,
+            numero: telefone.slice(0, 9)
+        };
+    }
+
+    const d = telefone || dddInformado;
     return {
         ddd: d.slice(0, 2),
         numero: d.slice(2, 11)
+    };
+}
+
+export function separarEnderecoNumero(endereco, numeroAtual = '') {
+    const enderecoLimpo = String(endereco ?? '').trim();
+    const numeroLimpo = String(numeroAtual ?? '').trim();
+
+    if (!enderecoLimpo || numeroLimpo) {
+        return { endereco: enderecoLimpo, numero: numeroLimpo };
+    }
+
+    // Reconhece números no fim do logradouro, inclusive após vírgula sem espaço,
+    // com ponto de milhar ou com um identificador complementar.
+    const partes = enderecoLimpo.match(
+        /^(.*?)(?:\s*,\s*|\s+)(?:N(?:[º°O.]|ÚMERO)?\s*)?(\d[\d.]*)(?:\s*-\s*([A-ZÀ-Ü.]+))?\s*$/i
+    );
+
+    if (!partes || !partes[1].trim()) {
+        return { endereco: enderecoLimpo, numero: 'S/N' };
+    }
+
+    const numeroBase = /^\d{1,3}(?:\.\d{3})+$/.test(partes[2])
+        ? partes[2].replace(/\./g, '')
+        : partes[2];
+    const sufixo = partes[3]?.replace(/\.+$/, '');
+
+    return {
+        endereco: partes[1].trim().replace(/,\s*$/, ''),
+        numero: sufixo ? `${numeroBase}-${sufixo}` : numeroBase
     };
 }
 

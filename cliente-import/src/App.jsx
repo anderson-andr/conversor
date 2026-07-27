@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import XLSX from 'xlsx';
+import XLSXStyle from 'xlsx-js-style';
 import './App.css';
 import {
   camposDestino as camposDestinoClientes,
@@ -14,12 +15,16 @@ import {
 import {
   camposDestinoProdutos,
   camposConfiguraveisProdutos,
-  regrasMapeamentoProdutos
+  regrasMapeamentoProdutos,
+  limitesTextoProdutos
 } from './data/produtos';
 import {
   limparCnpjCpf,
+  normalizarCodigo,
+  validarCnpjCpf,
   limparCep,
   separarTelefone,
+  separarEnderecoNumero,
   mapearTipoPessoa,
   mapearTipoInscricao,
   parseData,
@@ -27,6 +32,203 @@ import {
   normalizarTexto,
   detectarMapeamentoAutomatico
 } from './utils/helpers';
+
+function estoqueEstaZerado(valor) {
+  const texto = String(valor ?? '').replace(/['"]/g, '').trim();
+  if (!texto) return false;
+  const numero = Number(texto.replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(numero) && numero === 0;
+}
+
+function ajustarProdutoAoModelo(registro) {
+  const ajustado = { ...registro };
+  Object.entries(limitesTextoProdutos).forEach(([campo, limite]) => {
+    // O fabricante é validado pela tabela importada. Nunca abrevie o valor,
+    // pois isso pode criar um código que não existe no cadastro.
+    if (campo === 'Cod Fabricante' || campo === 'Cod Linha') return;
+    if (ajustado[campo] !== undefined && ajustado[campo] !== null) {
+      ajustado[campo] = String(ajustado[campo]).slice(0, limite);
+    }
+  });
+  return ajustado;
+}
+
+const limitesTextoCadastros = {
+  'Nome': 60,
+  'Nome Fantasia': 20,
+  'Tipo de Pessoa': 1,
+  'CNPJ/CPF': 14,
+  'Tipo de Inscrição': 1,
+  'Inscrição': 20,
+  'Segmento': 4,
+  'Segmento (4)': 4,
+  'Cód Grupo de Cliente': 10,
+  'Cód Tab Preço': 8,
+  'Form De Pgto': 2,
+  'Email': 80,
+  'Site': 50,
+  'Cód Rota': 8,
+  'Agência': 8,
+  'Conta': 10,
+  'Conta Contábil': 15,
+  'Endereco': 60,
+  'Endereço': 60,
+  'Bairro': 60,
+  'Municipio': 60,
+  'Estado': 2,
+  'Numero': 15,
+  'Complemento': 60,
+  'DDD': 4,
+  'Numero Tel': 9,
+  'Telefone': 9,
+  'DDD 2': 4,
+  'DDD_2': 4,
+  'Telefone 2': 9,
+  'Numero_2': 9,
+  'Nome Contato': 30,
+  'Cargo': 20,
+  'Email Contato': 50,
+  'Cód Vendedor': 8,
+  'Tipo': 1
+};
+
+function ajustarCadastroAoModelo(registro) {
+  const ajustado = { ...registro };
+  Object.entries(limitesTextoCadastros).forEach(([campo, limite]) => {
+    if (ajustado[campo] !== undefined && ajustado[campo] !== null) {
+      ajustado[campo] = String(ajustado[campo]).slice(0, limite);
+    }
+  });
+  return ajustado;
+}
+
+function normalizarChaveFabricante(valor) {
+  return normalizarTexto(valor)
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function limparAspasRegistro(registro) {
+  return Object.fromEntries(
+    Object.entries(registro).map(([campo, valor]) => [
+      campo,
+      typeof valor === 'string' ? valor.replace(/['"]/g, '') : valor
+    ])
+  );
+}
+
+function resolverCodigoFabricante(valorAtual, descricaoProduto, tabela) {
+  if (!tabela) return { codigo: String(valorAtual || '').trim(), status: 'sem-tabela' };
+
+  const valor = String(valorAtual || '').trim();
+  const valorNormalizado = normalizarChaveFabricante(valor);
+  if (valor && tabela.codigos.has(valor.toUpperCase())) {
+    return { codigo: valor.toUpperCase(), status: 'codigo-existente' };
+  }
+
+  if (valorNormalizado) {
+    const codigosExatos = tabela.porDescricao.get(valorNormalizado);
+    if (codigosExatos?.length === 1) {
+      return { codigo: codigosExatos[0], status: 'convertido' };
+    }
+    if (codigosExatos?.length > 1) {
+      return { codigo: '', status: 'ambiguo' };
+    }
+  }
+
+  const descricao = normalizarChaveFabricante(descricaoProduto);
+  const correspondencias = tabela.descricoesOrdenadas
+    .filter(item => descricao.includes(item.descricao));
+  if (correspondencias.length === 0) {
+    return { codigo: '', status: 'nao-encontrado' };
+  }
+
+  const maiorTamanho = correspondencias[0].descricao.length;
+  const maisEspecificas = correspondencias.filter(item => item.descricao.length === maiorTamanho);
+  const codigos = [...new Set(maisEspecificas.flatMap(item => item.codigos))];
+  return codigos.length === 1
+    ? { codigo: codigos[0], status: 'convertido' }
+    : { codigo: '', status: 'ambiguo' };
+}
+
+function resolverCodigoLinha(valorAtual, tabela) {
+  if (!tabela) return { codigo: String(valorAtual || '').trim(), status: 'sem-tabela' };
+
+  const valor = String(valorAtual || '').trim();
+  if (!valor) return { codigo: '', status: 'nao-encontrado' };
+
+  const codigoNormalizado = valor.toUpperCase();
+  if (tabela.codigos.has(codigoNormalizado)) {
+    return { codigo: codigoNormalizado, status: 'codigo-existente' };
+  }
+
+  const codigos = tabela.porDescricao.get(normalizarChaveFabricante(valor));
+  if (codigos?.length === 1) {
+    return { codigo: codigos[0], status: 'convertido' };
+  }
+  if (!codigos && tabela.codigoDesativados) {
+    return { codigo: tabela.codigoDesativados, status: 'desativado' };
+  }
+  return {
+    codigo: '',
+    status: codigos?.length > 1 ? 'ambiguo' : 'nao-encontrado'
+  };
+}
+
+async function criarWorkbookModelo(nomeModelo, dados, campos) {
+  const urlModelo = new URL(`templates/${nomeModelo}.xlsx`, document.baseURI);
+  const resposta = await fetch(urlModelo);
+  if (!resposta.ok) {
+    throw new Error(`Não foi possível carregar o modelo de produtos (${resposta.status}).`);
+  }
+
+  const workbook = XLSXStyle.read(await resposta.arrayBuffer(), {
+    type: 'array',
+    cellStyles: true
+  });
+  const nomeAba = workbook.SheetNames.includes(nomeModelo)
+    ? nomeModelo
+    : workbook.SheetNames[0];
+  const planilha = workbook.Sheets[nomeAba];
+
+  Object.keys(planilha).forEach(referencia => {
+    if (referencia.startsWith('!')) return;
+    const posicao = XLSXStyle.utils.decode_cell(referencia);
+    if (posicao.r > 0) delete planilha[referencia];
+  });
+
+  const camposModelo = campos.map(({ nome }) => nome);
+  const camposObrigatorios = new Set(
+    campos
+      .filter(({ obrigatorio }) => obrigatorio)
+      .map(({ nome }) => nome)
+  );
+  camposModelo.forEach((campo, indice) => {
+    const referencia = XLSXStyle.utils.encode_cell({ r: 0, c: indice });
+    planilha[referencia].s = {
+      fill: {
+        patternType: 'solid',
+        fgColor: { rgb: camposObrigatorios.has(campo) ? 'FFA07A' : 'FFFFFF' }
+      }
+    };
+    if (planilha[referencia].c) {
+      planilha[referencia].c.hidden = true;
+    }
+  });
+  const dadosSemAspas = dados.map(limparAspasRegistro);
+  XLSXStyle.utils.sheet_add_json(planilha, dadosSemAspas, {
+    header: camposModelo,
+    skipHeader: true,
+    origin: 'A2'
+  });
+  planilha['!ref'] = XLSXStyle.utils.encode_range({
+    s: { r: 0, c: 0 },
+    e: { r: Math.max(0, dadosSemAspas.length), c: camposModelo.length - 1 }
+  });
+
+  return workbook;
+}
 
 function App() {
   const [step, setStep] = useState(0);
@@ -36,6 +238,8 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [processando, setProcessando] = useState(false);
   const fileInputRef = useRef(null);
+  const fabricantesInputRef = useRef(null);
+  const linhasInputRef = useRef(null);
   
   // REFS PARA DADOS MASSIVOS (evita re-renders)
   const dadosOriginaisRef = useRef([]);
@@ -43,6 +247,8 @@ function App() {
   const dadosMapeadosRef = useRef([]);
   const dadosProcessadosRef = useRef([]);
   const duplicadosRef = useRef([]);
+  const fabricantesRef = useRef(null);
+  const linhasRef = useRef(null);
   // O mapeamento precisa ser estado: cada alteração deve atualizar os selects e os indicadores da tela.
   const [mapeamentoAtual, setMapeamentoAtual] = useState({});
   const [paginaAtual, setPaginaAtual] = useState(1);
@@ -56,6 +262,9 @@ function App() {
   const [alteracoesDetalhadas, setAlteracoesDetalhadas] = useState([]);
   const [filtroAtivo, setFiltroAtivo] = useState('todos');
   const [progresso, setProgresso] = useState(0);
+  const [resumoFabricantes, setResumoFabricantes] = useState(null);
+  const [resumoLinhas, setResumoLinhas] = useState(null);
+  const [desativarEstoqueZero, setDesativarEstoqueZero] = useState(false);
 
   const ehFornecedor = tipoCadastro === 'fornecedor';
   const ehProduto = tipoCadastro === 'produto';
@@ -82,6 +291,11 @@ function App() {
     dadosMapeadosRef.current = [];
     dadosProcessadosRef.current = [];
     duplicadosRef.current = [];
+    fabricantesRef.current = null;
+    linhasRef.current = null;
+    setResumoFabricantes(null);
+    setResumoLinhas(null);
+    setDesativarEstoqueZero(false);
     setTipoCadastro(null);
     setStep(0);
     setMapeamentoAtual({});
@@ -107,7 +321,9 @@ function App() {
         
         // Usar setTimeout para permitir que a UI atualize antes de processar
         setTimeout(() => {
-          const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          const jsonData = XLSX.utils
+            .sheet_to_json(sheet, { defval: '' })
+            .map(limparAspasRegistro);
           
           console.log(`Arquivo carregado: ${jsonData.length} linhas`);
           dadosOriginaisRef.current = jsonData;
@@ -158,6 +374,121 @@ function App() {
     }
   }, [handleFileUpload]);
 
+  const handleFabricantesInput = useCallback((e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = evento => {
+      try {
+        const workbook = XLSX.read(new Uint8Array(evento.target.result), { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        const cabecalhos = Object.keys(rows[0] || {});
+        const campoDescricao = cabecalhos.find(campo => {
+          const chave = normalizarChaveFabricante(campo);
+          return chave === 'DESCRICAO' || chave.includes('FABRICANTE');
+        });
+        const campoCodigoFabricante = cabecalhos.find(campo => {
+          const chave = normalizarChaveFabricante(campo);
+          return chave === 'CODIGO' || chave === 'COD' || chave.includes('COD FABRICANTE');
+        });
+
+        if (!campoDescricao || !campoCodigoFabricante) {
+          alert('Não foi possível identificar as colunas de descrição e código na tabela de fabricantes.');
+          return;
+        }
+
+        const porDescricao = new Map();
+        const codigos = new Set();
+        rows.forEach(row => {
+          const descricao = normalizarChaveFabricante(row[campoDescricao]);
+          const codigo = String(row[campoCodigoFabricante] || '').trim().toUpperCase();
+          if (!descricao || !codigo) return;
+          if (!porDescricao.has(descricao)) porDescricao.set(descricao, []);
+          const lista = porDescricao.get(descricao);
+          if (!lista.includes(codigo)) lista.push(codigo);
+          codigos.add(codigo);
+        });
+
+        fabricantesRef.current = {
+          porDescricao,
+          codigos,
+          codigoDesativados: porDescricao.get('DESATIVADOS')?.[0] || '',
+          descricoesOrdenadas: [...porDescricao.entries()]
+            .map(([descricao, listaCodigos]) => ({ descricao, codigos: listaCodigos }))
+            .sort((a, b) => b.descricao.length - a.descricao.length)
+        };
+        setResumoFabricantes({
+          arquivo: file.name,
+          fabricantes: porDescricao.size,
+          ambiguos: [...porDescricao.values()].filter(lista => lista.length > 1).length
+        });
+      } catch (error) {
+        console.error('Erro ao ler fabricantes:', error);
+        alert('Não foi possível ler a tabela de fabricantes.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  }, []);
+
+  const handleLinhasInput = useCallback((e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = evento => {
+      try {
+        const workbook = XLSX.read(new Uint8Array(evento.target.result), { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        const cabecalhos = Object.keys(rows[0] || {});
+        const campoDescricao = cabecalhos.find(campo => {
+          const chave = normalizarChaveFabricante(campo);
+          return chave === 'DESCRICAO' || chave === 'NOME LINHA' || chave === 'LINHA';
+        });
+        const campoCodigo = cabecalhos.find(campo => {
+          const chave = normalizarChaveFabricante(campo);
+          return chave === 'CODIGO' || chave === 'COD' || chave === 'COD LINHA';
+        });
+
+        if (!campoDescricao || !campoCodigo) {
+          alert('Não foi possível identificar as colunas de descrição e código na tabela de linhas.');
+          return;
+        }
+
+        const porDescricao = new Map();
+        const codigos = new Set();
+        rows.forEach(row => {
+          const descricao = normalizarChaveFabricante(row[campoDescricao]);
+          const codigo = String(row[campoCodigo] || '').replace(/['"]/g, '').trim().toUpperCase();
+          if (!descricao || !codigo) return;
+          if (!porDescricao.has(descricao)) porDescricao.set(descricao, []);
+          const lista = porDescricao.get(descricao);
+          if (!lista.includes(codigo)) lista.push(codigo);
+          codigos.add(codigo);
+        });
+
+        linhasRef.current = {
+          porDescricao,
+          codigos,
+          codigoDesativados: porDescricao.get('DESATIVADOS')?.[0] || ''
+        };
+        setResumoLinhas({
+          arquivo: file.name,
+          linhas: porDescricao.size,
+          ambiguos: [...porDescricao.values()].filter(lista => lista.length > 1).length
+        });
+      } catch (error) {
+        console.error('Erro ao ler linhas:', error);
+        alert('Não foi possível ler a tabela de linhas.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  }, []);
+
   const handleClickUpload = useCallback(() => {
     if (fileInputRef.current) {
       fileInputRef.current.click();
@@ -192,6 +523,10 @@ function App() {
 
     if (!mapeamentoAtual[campoCodigo]) {
       alert(`Mapeie o campo obrigatório "${campoCodigo}" antes de continuar. Sem ele não é possível identificar os registros.`);
+      return;
+    }
+    if (!ehProduto && !mapeamentoAtual['CNPJ/CPF']) {
+      alert('Mapeie o campo obrigatório "CNPJ/CPF" antes de continuar. Esse valor deve ser individual para cada cadastro.');
       return;
     }
 
@@ -248,7 +583,7 @@ function App() {
     };
 
     requestAnimationFrame(mapearLote);
-  }, [campoCodigo, camposDestino, mapeamentoAtual, processando]);
+  }, [campoCodigo, camposDestino, ehProduto, mapeamentoAtual, processando]);
 
   const voltarMapeamento = useCallback(() => {
     setStep(2);
@@ -267,6 +602,51 @@ function App() {
   }, []);
 
   const processarPlanilha = useCallback(() => {
+    if (
+      ehProduto &&
+      desativarEstoqueZero &&
+      dadosOriginaisRef.current.length > 0 &&
+      !Object.prototype.hasOwnProperty.call(dadosOriginaisRef.current[0], 'ESTQ')
+    ) {
+      alert('A regra ESTQ 0 → DESATIVADOS foi marcada, mas a coluna ESTQ não existe na planilha importada.');
+      return;
+    }
+
+    const aplicarDesativacaoPorEstoque =
+      ehProduto &&
+      desativarEstoqueZero &&
+      dadosOriginaisRef.current.some(row => estoqueEstaZerado(row['ESTQ']));
+
+    if (
+      aplicarDesativacaoPorEstoque &&
+      (!fabricantesRef.current?.codigoDesativados || !linhasRef.current?.codigoDesativados)
+    ) {
+      alert(
+        'Para esta planilha, importe as tabelas de fabricantes e linhas contendo a descrição DESATIVADOS antes de processar.'
+      );
+      return;
+    }
+
+    const obrigatoriosSemValorPadrao = camposDestino.filter(({ nome, obrigatorio }) => {
+      if (
+        !obrigatorio ||
+        nome === campoCodigo ||
+        nome === 'CNPJ/CPF' ||
+        (nome === 'Cod Fabricante' && fabricantesRef.current) ||
+        (nome === 'Cod Linha' && linhasRef.current) ||
+        mapeamentoAtual[nome]
+      ) return false;
+      return String(configPadrao[nome] ?? '').trim() === '';
+    });
+
+    if (obrigatoriosSemValorPadrao.length > 0) {
+      alert(
+        `Preencha os campos obrigatórios não mapeados antes de continuar:\n\n` +
+        obrigatoriosSemValorPadrao.map(({ nome }) => `• ${nome}`).join('\n')
+      );
+      return;
+    }
+
     setProcessando(true);
     setProgresso(0);
     
@@ -278,6 +658,14 @@ function App() {
       const chunkSize = 1000; // Aumentado para 1000 registros por vez (mais eficiente)
       let currentIndex = 0;
       const dadosProcessadosNovo = [];
+      let fabricantesConvertidos = 0;
+      let fabricantesNaoEncontrados = 0;
+      let fabricantesAmbiguos = 0;
+      let linhasConvertidas = 0;
+      let linhasNaoEncontradas = 0;
+      let linhasAmbiguas = 0;
+      let linhasMarcadasDesativadas = 0;
+      let produtosDesativadosPorEstoque = 0;
       
       const processChunk = () => {
         const chunkEnd = Math.min(currentIndex + chunkSize, total);
@@ -285,7 +673,8 @@ function App() {
         // Filtrar e processar chunk atual
         for (let i = currentIndex; i < chunkEnd; i++) {
           const row = dadosParaProcessar[i];
-          const codigo = String(row[campoCodigo] || '').trim();
+          const rowOriginal = dadosOriginaisRef.current[i] || {};
+          const codigo = normalizarCodigo(row[campoCodigo]);
           
           if (codigo === '') continue;
           
@@ -297,12 +686,12 @@ function App() {
             'Nome': normalizarTexto(row['Nome']) || configPadrao['Nome'] || '',
             'Nome Fantasia': normalizarTexto(row['Nome Fantasia']) || configPadrao['Nome Fantasia'] || '',
             'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']) || configPadrao['Tipo de Pessoa'] || 'F',
-            'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF']),
-            'Tipo de Inscrição': mapearTipoInscricao(row),
+            'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF'], mapearTipoPessoa(row['Tipo de Pessoa'])),
+            'Tipo de Inscrição': row['Tipo de Inscrição'] || configPadrao['Tipo de Inscrição'] || mapearTipoInscricao(row),
             'Inscrição': row['Inscrição'] || '',
             'Segmento': row['Segmento'] || configPadrao['Segmento'] || 'CL',
             'Cód Grupo de Cliente': row['Cód Grupo de Cliente'] || configPadrao['Cód Grupo de Cliente'] || '',
-            'Data de Cadastro': parseData(row['Data de Cadastro']) || parseData(new Date()) || '01/01/2024',
+            'Data de Cadastro': parseData(row['Data de Cadastro'] || configPadrao['Data de Cadastro']) || parseData(new Date()) || '01/01/2024',
             'Data da 1ª compra': parseData(row['Data da 1ª compra']) || '',
             'Data Ult Compra': parseData(row['Data Ult Compra']) || '',
             'Limite de Crédito': row['Limite de Crédito'] || '',
@@ -316,12 +705,12 @@ function App() {
             'Agência': row['Agência'] || configPadrao['Agência'] || '',
             'Conta': row['Conta'] || configPadrao['Conta'] || '',
             'Cód Tipo tributação': row['Cód Tipo tributação'] || configPadrao['Cód Tipo tributação'] || '1',
-            'Endereco': row['Endereco'] || '',
-            'Bairro': row['Bairro'] || '',
-            'Municipio': row['Municipio'] || '',
-            'Cep': limparCep(row['Cep']),
-            'Estado': row['Estado'] || '',
-            'Numero': row['Numero'] || '',
+            'Endereco': row['Endereco'] || configPadrao['Endereco'] || '',
+            'Bairro': row['Bairro'] || configPadrao['Bairro'] || '',
+            'Municipio': row['Municipio'] || configPadrao['Municipio'] || '',
+            'Cep': limparCep(row['Cep'] || configPadrao['Cep']),
+            'Estado': row['Estado'] || configPadrao['Estado'] || '',
+            'Numero': row['Numero'] || configPadrao['Numero'] || '',
             'Complemento': row['Complemento'] || '',
             'DDD': tel1.ddd,
             'Numero Tel': tel1.numero,
@@ -331,7 +720,9 @@ function App() {
             'DDD_2': tel2.ddd,
             'Numero_2': tel2.numero,
             'Cód Vendedor': row['Cód Vendedor'] || configPadrao['Cód Vendedor'] || 'PATRICKK',
-            'Ativo': mapearAtivo(row['Ativo']) !== undefined ? mapearAtivo(row['Ativo']) : 1
+            'Ativo': row['Ativo'] !== undefined
+              ? mapearAtivo(row['Ativo'])
+              : configPadrao['Ativo'] !== undefined ? mapearAtivo(configPadrao['Ativo']) : ''
           };
 
           if (ehFornecedor) {
@@ -342,21 +733,21 @@ function App() {
               'Cód Fornec': codigo,
               'Tipo': row['Tipo'] || configPadrao['Tipo'] || '',
               'Segmento (4)': row['Segmento (4)'] || configPadrao['Segmento (4)'] || '',
-              'Nome': normalizarTexto(row['Nome']),
+              'Nome': normalizarTexto(row['Nome'] || configPadrao['Nome']),
               'Nome Fantasia': normalizarTexto(row['Nome Fantasia']),
-              'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']),
-              'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF']),
-              'Tipo de Inscrição': row['Tipo de Inscrição'] !== undefined ? mapearTipoInscricao(row) : '',
+              'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']) || configPadrao['Tipo de Pessoa'] || '',
+              'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF'], mapearTipoPessoa(row['Tipo de Pessoa'])),
+              'Tipo de Inscrição': row['Tipo de Inscrição'] || configPadrao['Tipo de Inscrição'] || mapearTipoInscricao(row),
               'Inscrição': row['Inscrição'] || '',
               'Conta Contábil': row['Conta Contábil'] || configPadrao['Conta Contábil'] || '',
-              'Data de Cadastro': parseData(row['Data de Cadastro']),
+              'Data de Cadastro': parseData(row['Data de Cadastro'] || configPadrao['Data de Cadastro']),
               'Email': row['Email'] || '',
-              'Endereço': row['Endereço'] || '',
-              'Bairro': row['Bairro'] || '',
-              'Municipio': row['Municipio'] || '',
-              'Cep': limparCep(row['Cep']),
-              'Estado': row['Estado'] || '',
-              'Numero': row['Numero'] || '',
+              'Endereço': row['Endereço'] || configPadrao['Endereço'] || '',
+              'Bairro': row['Bairro'] || configPadrao['Bairro'] || '',
+              'Municipio': row['Municipio'] || configPadrao['Municipio'] || '',
+              'Cep': limparCep(row['Cep'] || configPadrao['Cep']),
+              'Estado': row['Estado'] || configPadrao['Estado'] || '',
+              'Numero': row['Numero'] || configPadrao['Numero'] || '',
               'Complemento': row['Complemento'] || '',
               'DDD': row['DDD'] || telefone.ddd,
               'Telefone': telefone.numero || row['Telefone'] || '',
@@ -366,7 +757,9 @@ function App() {
               'Site': row['Site'] || '',
               'Cargo': row['Cargo'] || configPadrao['Cargo'] || '',
               'Email Contato': row['Email Contato'] || '',
-              'Ativo': row['Ativo'] !== undefined ? mapearAtivo(row['Ativo']) : ''
+              'Ativo': row['Ativo'] !== undefined
+                ? mapearAtivo(row['Ativo'])
+                : configPadrao['Ativo'] !== undefined ? mapearAtivo(configPadrao['Ativo']) : ''
             };
           }
 
@@ -375,12 +768,13 @@ function App() {
               camposDestinoProdutos.map(({ nome }) => [nome, row[nome] || configPadrao[nome] || ''])
             );
             registro['Cod Produto'] = codigo;
-            registro['Descrição'] = normalizarTexto(row['Descrição']);
-            registro['Desc Resumida'] = normalizarTexto(row['Desc Resumida']);
-            registro['Data Cadastro'] = parseData(row['Data Cadastro']);
+            registro['Descrição'] = normalizarTexto(row['Descrição'] || configPadrao['Descrição']);
+            registro['Desc Resumida'] = normalizarTexto(row['Desc Resumida'] || configPadrao['Desc Resumida']);
+            registro['Data Cadastro'] = parseData(row['Data Cadastro'] || configPadrao['Data Cadastro']);
             registro['Ativo'] = row['Ativo'] !== undefined
               ? mapearAtivo(row['Ativo'])
               : configPadrao['Ativo'] !== undefined ? mapearAtivo(configPadrao['Ativo']) : '';
+            registro = ajustarProdutoAoModelo(registro);
           }
 
           // Valores automáticos não devem preencher campos que não vieram do arquivo
@@ -396,9 +790,64 @@ function App() {
             }
           });
 
-          const enderecoPreenchido = String(registro['Endereco'] || registro['Endereço'] || '').trim() !== '';
-          if (enderecoPreenchido && String(registro['Numero'] || '').trim() === '') {
-            registro['Numero'] = 'S/N';
+          if (ehProduto && fabricantesRef.current) {
+            const resultadoFabricante = resolverCodigoFabricante(
+              row['Cod Fabricante'],
+              row['Descrição'],
+              fabricantesRef.current
+            );
+            registro['Cod Fabricante'] = resultadoFabricante.codigo;
+            if (resultadoFabricante.status === 'convertido') fabricantesConvertidos++;
+            if (resultadoFabricante.status === 'nao-encontrado') fabricantesNaoEncontrados++;
+            if (resultadoFabricante.status === 'ambiguo') fabricantesAmbiguos++;
+          }
+          if (ehProduto && !fabricantesRef.current) {
+            const fabricanteInformado = String(row['Cod Fabricante'] || configPadrao['Cod Fabricante'] || '').trim();
+            if (fabricanteInformado && !/^[A-Z0-9]{1,6}$/i.test(fabricanteInformado)) {
+              registro['Cod Fabricante'] = '';
+            }
+          }
+          if (ehProduto && linhasRef.current) {
+            const resultadoLinha = resolverCodigoLinha(row['Cod Linha'], linhasRef.current);
+            registro['Cod Linha'] = resultadoLinha.codigo;
+            if (resultadoLinha.status === 'convertido') linhasConvertidas++;
+            if (resultadoLinha.status === 'nao-encontrado') linhasNaoEncontradas++;
+            if (resultadoLinha.status === 'ambiguo') linhasAmbiguas++;
+            if (resultadoLinha.status === 'desativado') linhasMarcadasDesativadas++;
+          }
+          if (aplicarDesativacaoPorEstoque && estoqueEstaZerado(rowOriginal['ESTQ'])) {
+            registro['Cod Fabricante'] = fabricantesRef.current.codigoDesativados;
+            registro['Cod Linha'] = linhasRef.current.codigoDesativados;
+            produtosDesativadosPorEstoque++;
+          }
+
+          if (!ehProduto) {
+            const tipoInscricaoVazio = String(registro['Tipo de Inscrição'] || '').trim() === '';
+            const inscricaoVazia = String(registro['Inscrição'] || '').trim() === '';
+            if (tipoInscricaoVazio && inscricaoVazia) {
+              registro['Tipo de Inscrição'] = 'I';
+              registro['Inscrição'] = 'ISENTO';
+            }
+
+            const telefonePrincipal = separarTelefone(
+              ehFornecedor ? row['Telefone'] : row['Numero Tel'],
+              row['DDD']
+            );
+            const telefoneSecundario = separarTelefone(
+              ehFornecedor ? row['Telefone 2'] : row['Numero_2'],
+              ehFornecedor ? row['DDD 2'] : row['DDD_2']
+            );
+
+            registro['DDD'] = telefonePrincipal.ddd;
+            registro[ehFornecedor ? 'Telefone' : 'Numero Tel'] = telefonePrincipal.numero;
+            registro[ehFornecedor ? 'DDD 2' : 'DDD_2'] = telefoneSecundario.ddd;
+            registro[ehFornecedor ? 'Telefone 2' : 'Numero_2'] = telefoneSecundario.numero;
+
+            const campoEndereco = ehFornecedor ? 'Endereço' : 'Endereco';
+            const enderecoSeparado = separarEnderecoNumero(registro[campoEndereco], registro['Numero']);
+            registro[campoEndereco] = enderecoSeparado.endereco;
+            registro['Numero'] = enderecoSeparado.numero;
+            registro = ajustarCadastroAoModelo(registro);
           }
 
           dadosProcessadosNovo.push(registro);
@@ -472,28 +921,56 @@ function App() {
               tipo: 'warning'
             }]);
           }
+
+          if (ehProduto && fabricantesRef.current) {
+            setLogAlteracoes(prev => [...prev, {
+              timestamp: new Date().toISOString(),
+              mensagem: `De/para de fabricantes: ${fabricantesConvertidos} convertidos, ${fabricantesNaoEncontrados} não encontrados e ${fabricantesAmbiguos} ambíguos`,
+              tipo: fabricantesNaoEncontrados || fabricantesAmbiguos ? 'warning' : 'success'
+            }]);
+          }
+          if (ehProduto && linhasRef.current) {
+            setLogAlteracoes(prev => [...prev, {
+              timestamp: new Date().toISOString(),
+              mensagem: `De/para de linhas: ${linhasConvertidas} convertidas, ${linhasMarcadasDesativadas} marcadas como DESATIVADOS, ${linhasNaoEncontradas} não encontradas e ${linhasAmbiguas} ambíguas`,
+              tipo: linhasNaoEncontradas || linhasAmbiguas ? 'warning' : 'success'
+            }]);
+          }
+          if (aplicarDesativacaoPorEstoque) {
+            setLogAlteracoes(prev => [...prev, {
+              timestamp: new Date().toISOString(),
+              mensagem: `${produtosDesativadosPorEstoque} produto(s) com ESTQ igual a 0 enviados automaticamente para fabricante e linha DESATIVADOS`,
+              tipo: 'success'
+            }]);
+          }
         }
       };
       
       // Inicia processamento após renderização
       requestAnimationFrame(processChunk);
     }, 100);
-  }, [campoCodigo, campoDuplicidade, camposDestino, configPadrao, ehFornecedor, ehProduto, nomeCadastro]);
+  }, [campoCodigo, campoDuplicidade, camposDestino, configPadrao, desativarEstoqueZero, ehFornecedor, ehProduto, mapeamentoAtual, nomeCadastro]);
 
   // Atualização de campos
   const atualizarCampo = useCallback((idx, campo, valor) => {
       const novosDados = [...dadosProcessadosRef.current];
       const valorAnterior = novosDados[idx][campo];
+      const limite = ehProduto && (campo === 'Cod Fabricante' || campo === 'Cod Linha')
+        ? undefined
+        : ehProduto ? limitesTextoProdutos[campo] : limitesTextoCadastros[campo];
+      const valorAjustado = limite
+        ? String(valor ?? '').slice(0, limite)
+        : valor;
       
-      if (valorAnterior !== valor) {
-        novosDados[idx] = { ...novosDados[idx], [campo]: valor };
+      if (valorAnterior !== valorAjustado) {
+        novosDados[idx] = { ...novosDados[idx], [campo]: valorAjustado };
         
         setAlteracoesDetalhadas(prevAlt => {
           const novaAlteracao = {
             idx,
             campo,
             valorAnterior,
-            novoValor: valor,
+            novoValor: valorAjustado,
             timestamp: new Date().toISOString()
           };
           return [...prevAlt, novaAlteracao];
@@ -503,43 +980,137 @@ function App() {
           ...prevLog,
           {
             timestamp: new Date().toISOString(),
-            mensagem: `Campo "${campo}" alterado de "${valorAnterior}" para "${valor}"`,
+            mensagem: `Campo "${campo}" alterado de "${valorAnterior}" para "${valorAjustado}"`,
             tipo: 'info'
           }
         ]);
       }
       
       dadosProcessadosRef.current = novosDados;
-  }, []);
+  }, [ehProduto]);
 
   // Exportação
-  const exportarExcel = useCallback(() => {
-    const camposModelo = (ehFornecedor ? camposDestinoFornecedores : camposDestinoProdutos).map(({ nome }) => nome);
-    const ws = (ehFornecedor || ehProduto)
-      ? XLSX.utils.json_to_sheet(dadosProcessadosRef.current, { header: camposModelo, skipHeader: true, origin: 'A2' })
-      : XLSX.utils.json_to_sheet(dadosProcessadosRef.current);
+  const exportarExcel = useCallback(async () => {
+    const documentosExportados = new Set();
+    const codigosExportados = new Set();
+    const dadosNormalizados = ehProduto
+      ? dadosProcessadosRef.current.map(registro => {
+          const fabricante = resolverCodigoFabricante(
+            registro['Cod Fabricante'],
+            registro['Descrição'],
+            fabricantesRef.current
+          );
+          return ajustarProdutoAoModelo({
+            ...registro,
+            'Cod Linha': resolverCodigoLinha(
+              registro['Cod Linha'],
+              linhasRef.current
+            ).codigo,
+            'Cod Fabricante': fabricante.codigo
+          });
+        })
+      : dadosProcessadosRef.current.map(registro => ({
+          ...ajustarCadastroAoModelo(registro),
+          [campoCodigo]: normalizarCodigo(registro[campoCodigo]),
+          'CNPJ/CPF': limparCnpjCpf(registro['CNPJ/CPF'], registro['Tipo de Pessoa'])
+        }));
+    const dadosParaExportar = ehProduto
+      ? dadosNormalizados
+      : dadosNormalizados.filter(registro => {
+          const documento = registro['CNPJ/CPF'];
+          const codigoOriginal = String(registro[campoCodigo] ?? '').trim();
+          const codigo = /^\d+$/.test(codigoOriginal)
+            ? codigoOriginal.replace(/^0+(?=\d)/, '')
+            : codigoOriginal.toUpperCase();
 
-    if (ehFornecedor || ehProduto) {
-      const cabecalhosModelo = camposModelo.map(campo => ehFornecedor && campo === 'Email Contato' ? 'Email' : campo);
-      XLSX.utils.sheet_add_aoa(ws, [cabecalhosModelo], { origin: 'A1' });
+          if (
+            !codigo ||
+            !validarCnpjCpf(documento) ||
+            codigosExportados.has(codigo) ||
+            documentosExportados.has(documento)
+          ) {
+            return false;
+          }
+          codigosExportados.add(codigo);
+          documentosExportados.add(documento);
+          return true;
+        });
+
+    if (dadosParaExportar.length === 0) {
+      alert(`Nenhum ${nomeCadastro} com CPF/CNPJ válido e não duplicado está disponível para exportação.`);
+      return;
     }
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, ehProduto ? 'Produtos' : ehFornecedor ? 'Fornecedores' : 'Clientes');
-    
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    XLSX.writeFile(wb, `${ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES'}_IMPORT_${timestamp}.xls`, { bookType: 'biff8' });
-  }, [ehFornecedor, ehProduto]);
 
-  const exportarApenasAlteracoes = useCallback(() => {
-    const indicesAlterados = [...new Set(alteracoesDetalhadas.map(a => a.idx))];
-    const dadosAlterados = indicesAlterados.map(idx => dadosProcessadosRef.current[idx]);
-    
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const ws = XLSX.utils.json_to_sheet(dadosAlterados);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Alterados');
-    XLSX.writeFile(wb, `CLIENTES_SOMENTE_ALTERADOS_${timestamp}.xls`, { bookType: 'biff8' });
-  }, [alteracoesDetalhadas]);
+    const nomeModelo = ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES';
+    try {
+      const wbModelo = await criarWorkbookModelo(nomeModelo, dadosParaExportar, camposDestino);
+      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_IMPORT_${timestamp}.xls`, { bookType: 'biff8' });
+    } catch (error) {
+      console.error(`Erro ao gerar planilha de ${nomeCadastro}s:`, error);
+      alert(`Não foi possível gerar a planilha de ${nomeCadastro}s com o modelo de cabeçalhos.`);
+    }
+  }, [campoCodigo, camposDestino, ehFornecedor, ehProduto, nomeCadastro]);
+
+  const exportarApenasAlteracoes = useCallback(async () => {
+    const indicesAlterados = [...new Set(alteracoesDetalhadas.map(a => a.idx))];
+    const documentosExportados = new Set();
+    const codigosExportados = new Set();
+    const dadosAlterados = indicesAlterados
+      .map(idx => dadosProcessadosRef.current[idx])
+      .map(registro => ehProduto
+        ? ajustarProdutoAoModelo({
+            ...registro,
+            'Cod Linha': resolverCodigoLinha(
+              registro['Cod Linha'],
+              linhasRef.current
+            ).codigo,
+            'Cod Fabricante': resolverCodigoFabricante(
+              registro['Cod Fabricante'],
+              registro['Descrição'],
+              fabricantesRef.current
+            ).codigo
+          })
+        : {
+            ...ajustarCadastroAoModelo(registro),
+            [campoCodigo]: normalizarCodigo(registro[campoCodigo]),
+            'CNPJ/CPF': limparCnpjCpf(registro['CNPJ/CPF'], registro['Tipo de Pessoa'])
+          })
+      .filter(registro => {
+        if (ehProduto) return true;
+        const documento = registro['CNPJ/CPF'];
+        const codigoOriginal = String(registro[campoCodigo] ?? '').trim();
+        const codigo = /^\d+$/.test(codigoOriginal)
+          ? codigoOriginal.replace(/^0+(?=\d)/, '')
+          : codigoOriginal.toUpperCase();
+
+        if (
+          !codigo ||
+          !validarCnpjCpf(documento) ||
+          codigosExportados.has(codigo) ||
+          documentosExportados.has(documento)
+        ) return false;
+
+        codigosExportados.add(codigo);
+        documentosExportados.add(documento);
+        return true;
+      });
+
+    if (dadosAlterados.length === 0) {
+      alert('Nenhum cadastro alterado com CPF/CNPJ válido e não duplicado está disponível para exportação.');
+      return;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const nomeModelo = ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES';
+    try {
+      const wbModelo = await criarWorkbookModelo(nomeModelo, dadosAlterados, camposDestino);
+      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_SOMENTE_ALTERADOS_${timestamp}.xls`, { bookType: 'biff8' });
+    } catch (error) {
+      console.error(`Erro ao gerar planilha de ${nomeCadastro}s alterados:`, error);
+      alert(`Não foi possível gerar a planilha de ${nomeCadastro}s com o modelo de cabeçalhos.`);
+    }
+  }, [alteracoesDetalhadas, campoCodigo, camposDestino, ehFornecedor, ehProduto, nomeCadastro]);
 
   const exportarDuplicados = useCallback(() => {
     if (duplicadosRef.current.length === 0) return;
@@ -570,6 +1141,11 @@ function App() {
       dadosMapeadosRef.current = [];
       dadosProcessadosRef.current = [];
       duplicadosRef.current = [];
+      fabricantesRef.current = null;
+      linhasRef.current = null;
+      setResumoFabricantes(null);
+      setResumoLinhas(null);
+      setDesativarEstoqueZero(false);
       setMapeamentoAtual({});
       setConfigPadrao({});
       setAlteracoesDetalhadas([]);
@@ -716,6 +1292,89 @@ function App() {
             Para cada campo, selecione qual <strong>campo da sua planilha importada</strong> corresponde. 
             Campos mapeados automaticamente não precisarão ser preenchidos manualmente na etapa seguinte.
           </div>
+
+          {ehProduto && (
+            <div className="alert alert-info">
+              <strong>🏭 De/para de fabricantes</strong>
+              <p>
+                Carregue uma tabela com as colunas de descrição e código. O sistema converterá a descrição
+                do fabricante para o código correspondente e também procurará o fabricante na descrição do produto.
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => fabricantesInputRef.current?.click()}
+              >
+                📁 Importar tabela de fabricantes
+              </button>
+              <input
+                ref={fabricantesInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleFabricantesInput}
+                style={{ display: 'none' }}
+              />
+              {resumoFabricantes && (
+                <p style={{ marginTop: '10px', marginBottom: 0 }}>
+                  ✅ <strong>{resumoFabricantes.arquivo}</strong>: {resumoFabricantes.fabricantes} fabricantes carregados
+                  {resumoFabricantes.ambiguos > 0
+                    ? `, ${resumoFabricantes.ambiguos} descrição(ões) com mais de um código`
+                    : ''}
+                </p>
+              )}
+            </div>
+          )}
+
+          {ehProduto && (
+            <div className="alert alert-info">
+              <strong>📚 De/para de linhas</strong>
+              <p>
+                Carregue a tabela de linhas com as colunas de descrição e código. O nome da linha
+                informado na planilha de produtos será convertido somente para o código cadastrado.
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => linhasInputRef.current?.click()}
+              >
+                📁 Importar tabela de linhas
+              </button>
+              <input
+                ref={linhasInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleLinhasInput}
+                style={{ display: 'none' }}
+              />
+              {resumoLinhas && (
+                <p style={{ marginTop: '10px', marginBottom: 0 }}>
+                  ✅ <strong>{resumoLinhas.arquivo}</strong>: {resumoLinhas.linhas} linhas carregadas
+                  {resumoLinhas.ambiguos > 0
+                    ? `, ${resumoLinhas.ambiguos} descrição(ões) com mais de um código`
+                    : ''}
+                </p>
+              )}
+            </div>
+          )}
+
+          {ehProduto && (
+            <div className="alert alert-warning">
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={desativarEstoqueZero}
+                  onChange={(e) => setDesativarEstoqueZero(e.target.checked)}
+                  style={{ marginTop: '3px' }}
+                />
+                <span>
+                  <strong>ESTQ 0 → DESATIVADOS</strong>
+                  <br />
+                  Quando marcado, produtos com ESTQ igual a 0 recebem automaticamente os códigos
+                  de fabricante e linha DESATIVADOS das tabelas importadas.
+                </span>
+              </label>
+            </div>
+          )}
           
           <div className="mapeamento-header">
             <div>📤 CAMPO DE DESTINO (Target3)</div>

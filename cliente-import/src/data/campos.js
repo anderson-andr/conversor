@@ -48,7 +48,31 @@ export const camposDestino = [
 // Estes campos, quando mapeados, não precisam de valor padrão
 // ============================================
 export const camposConfiguraveis = [
+    { campo: 'Nome', default: '', label: 'Nome *', maxlength: 60 },
+    { campo: 'Nome Fantasia', default: '', label: 'Nome Fantasia *', maxlength: 20 },
+    {
+        campo: 'Tipo de Pessoa',
+        default: '',
+        label: 'Tipo de Pessoa *',
+        tipo: 'select',
+        opcoes: [
+            { valor: 'F', texto: 'F - Pessoa Física' },
+            { valor: 'J', texto: 'J - Pessoa Jurídica' }
+        ]
+    },
+    {
+        campo: 'Tipo de Inscrição',
+        default: '',
+        label: 'Tipo de Inscrição *',
+        tipo: 'select',
+        opcoes: [
+            { valor: 'E', texto: 'E - Estadual' },
+            { valor: 'M', texto: 'M - Municipal' },
+            { valor: 'I', texto: 'I - Isento' }
+        ]
+    },
     { campo: 'Segmento', default: '', label: 'Segmento *', maxlength: 4 },
+    { campo: 'Data de Cadastro', default: '', label: 'Data de Cadastro *', placeholder: 'dd/mm/aaaa', maxlength: 10 },
     { campo: 'Cód Tab Preço', default: '', label: 'Cód Tab Preço *', maxlength: 8 },
     { 
         campo: 'Form De Pgto', 
@@ -62,9 +86,25 @@ export const camposConfiguraveis = [
             { valor: 'DC', texto: 'DC - Depósito' }
         ]
     },
-    { campo: 'Condição De Pgto', default: '', label: 'Condição de Pagamento', maxlength: 10 },
     { campo: 'Cód Vendedor', default: '', label: 'Cód Vendedor *', maxlength: 8 },
     { campo: 'Cód Tipo tributação', default: '', label: 'Cód Tipo Tributação *', maxlength: 5 },
+    { campo: 'Endereco', default: '', label: 'Endereço *', maxlength: 60 },
+    { campo: 'Bairro', default: '', label: 'Bairro *', maxlength: 60 },
+    { campo: 'Municipio', default: '', label: 'Município *', maxlength: 60 },
+    { campo: 'Cep', default: '', label: 'CEP *', maxlength: 8 },
+    { campo: 'Estado', default: '', label: 'Estado (UF) *', maxlength: 2 },
+    { campo: 'Numero', default: '', label: 'Número *', maxlength: 15 },
+    {
+        campo: 'Ativo',
+        default: '',
+        label: 'Ativo *',
+        tipo: 'select',
+        opcoes: [
+            { valor: '1', texto: 'Sim' },
+            { valor: '0', texto: 'Não' }
+        ]
+    },
+    { campo: 'Condição De Pgto', default: '', label: 'Condição de Pagamento', maxlength: 10 },
     { campo: 'Cód Grupo de Cliente', default: '', label: 'Cód Grupo de Cliente', maxlength: 10 },
     { campo: 'Cód Rota', default: '', label: 'Cód Rota', maxlength: 8 },
     { campo: 'Banco', default: '', label: 'Banco', maxlength: 10 },
