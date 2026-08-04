@@ -40,6 +40,13 @@ function estoqueEstaZerado(valor) {
   return Number.isFinite(numero) && numero === 0;
 }
 
+function estoqueEhMaiorQueZero(valor) {
+  const texto = String(valor ?? '').replace(/['"]/g, '').trim();
+  if (!texto) return false;
+  const numero = Number(texto.replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(numero) && numero > 0;
+}
+
 function ajustarProdutoAoModelo(registro) {
   const ajustado = { ...registro };
   Object.entries(limitesTextoProdutos).forEach(([campo, limite]) => {
@@ -118,11 +125,20 @@ function limparAspasRegistro(registro) {
   );
 }
 
+function encontrarCodigoDesativado(porDescricao) {
+  const entrada = [...porDescricao.entries()]
+    .find(([descricao, codigos]) => descricao.startsWith('DESATIVAD') && codigos.length > 0);
+  return entrada?.[1]?.[0] || '';
+}
+
 function resolverCodigoFabricante(valorAtual, descricaoProduto, tabela) {
   if (!tabela) return { codigo: String(valorAtual || '').trim(), status: 'sem-tabela' };
 
   const valor = String(valorAtual || '').trim();
   const valorNormalizado = normalizarChaveFabricante(valor);
+  if (valorNormalizado.startsWith('DESATIVAD') && tabela.codigoDesativados) {
+    return { codigo: tabela.codigoDesativados, status: 'convertido' };
+  }
   if (valor && tabela.codigos.has(valor.toUpperCase())) {
     return { codigo: valor.toUpperCase(), status: 'codigo-existente' };
   }
@@ -158,12 +174,17 @@ function resolverCodigoLinha(valorAtual, tabela) {
   const valor = String(valorAtual || '').trim();
   if (!valor) return { codigo: '', status: 'nao-encontrado' };
 
+  const valorNormalizado = normalizarChaveFabricante(valor);
+  if (valorNormalizado.startsWith('DESATIVAD') && tabela.codigoDesativados) {
+    return { codigo: tabela.codigoDesativados, status: 'convertido' };
+  }
+
   const codigoNormalizado = valor.toUpperCase();
   if (tabela.codigos.has(codigoNormalizado)) {
     return { codigo: codigoNormalizado, status: 'codigo-existente' };
   }
 
-  const codigos = tabela.porDescricao.get(normalizarChaveFabricante(valor));
+  const codigos = tabela.porDescricao.get(valorNormalizado);
   if (codigos?.length === 1) {
     return { codigo: codigos[0], status: 'convertido' };
   }
@@ -200,21 +221,18 @@ async function criarWorkbookModelo(nomeModelo, dados, campos) {
 
   const camposModelo = campos.map(({ nome }) => nome);
   const camposObrigatorios = new Set(
-    campos
-      .filter(({ obrigatorio }) => obrigatorio)
-      .map(({ nome }) => nome)
+    campos.filter(({ obrigatorio }) => obrigatorio).map(({ nome }) => nome)
   );
   camposModelo.forEach((campo, indice) => {
     const referencia = XLSXStyle.utils.encode_cell({ r: 0, c: indice });
+    if (!planilha[referencia]) return;
     planilha[referencia].s = {
+      ...(planilha[referencia].s || {}),
       fill: {
         patternType: 'solid',
         fgColor: { rgb: camposObrigatorios.has(campo) ? 'FFA07A' : 'FFFFFF' }
       }
     };
-    if (planilha[referencia].c) {
-      planilha[referencia].c.hidden = true;
-    }
   });
   const dadosSemAspas = dados.map(limparAspasRegistro);
   XLSXStyle.utils.sheet_add_json(planilha, dadosSemAspas, {
@@ -414,7 +432,7 @@ function App() {
         fabricantesRef.current = {
           porDescricao,
           codigos,
-          codigoDesativados: porDescricao.get('DESATIVADOS')?.[0] || '',
+          codigoDesativados: encontrarCodigoDesativado(porDescricao),
           descricoesOrdenadas: [...porDescricao.entries()]
             .map(([descricao, listaCodigos]) => ({ descricao, codigos: listaCodigos }))
             .sort((a, b) => b.descricao.length - a.descricao.length)
@@ -473,7 +491,7 @@ function App() {
         linhasRef.current = {
           porDescricao,
           codigos,
-          codigoDesativados: porDescricao.get('DESATIVADOS')?.[0] || ''
+          codigoDesativados: encontrarCodigoDesativado(porDescricao)
         };
         setResumoLinhas({
           arquivo: file.name,
@@ -666,6 +684,7 @@ function App() {
       let linhasAmbiguas = 0;
       let linhasMarcadasDesativadas = 0;
       let produtosDesativadosPorEstoque = 0;
+      let produtosDesativadosComEstoquePositivo = 0;
       
       const processChunk = () => {
         const chunkEnd = Math.min(currentIndex + chunkSize, total);
@@ -819,6 +838,31 @@ function App() {
             registro['Cod Fabricante'] = fabricantesRef.current.codigoDesativados;
             registro['Cod Linha'] = linhasRef.current.codigoDesativados;
             produtosDesativadosPorEstoque++;
+          } else if (estoqueEhMaiorQueZero(rowOriginal['ESTQ'])) {
+            let possuiCodigoDesativado = false;
+            if (
+              fabricantesRef.current?.codigoDesativados &&
+              String(registro['Cod Fabricante'] || '').trim().toUpperCase() ===
+                String(fabricantesRef.current.codigoDesativados).trim().toUpperCase()
+            ) {
+              const codigoOriginal = registro['Cod Fabricante'];
+              registro.__observacaoFabricante = true;
+              registro['Cod Fabricante'] =
+                `ESTQ ${rowOriginal['ESTQ']} - Fabricante DESATIVADO com estoque maior que zero (código original: ${codigoOriginal})`;
+              possuiCodigoDesativado = true;
+            }
+            if (
+              linhasRef.current?.codigoDesativados &&
+              String(registro['Cod Linha'] || '').trim().toUpperCase() ===
+                String(linhasRef.current.codigoDesativados).trim().toUpperCase()
+            ) {
+              const codigoOriginal = registro['Cod Linha'];
+              registro.__observacaoLinha = true;
+              registro['Cod Linha'] =
+                `ESTQ ${rowOriginal['ESTQ']} - Linha DESATIVADA com estoque maior que zero (código original: ${codigoOriginal})`;
+              possuiCodigoDesativado = true;
+            }
+            if (possuiCodigoDesativado) produtosDesativadosComEstoquePositivo++;
           }
 
           if (!ehProduto) {
@@ -943,6 +987,13 @@ function App() {
               tipo: 'success'
             }]);
           }
+          if (produtosDesativadosComEstoquePositivo > 0) {
+            setLogAlteracoes(prev => [...prev, {
+              timestamp: new Date().toISOString(),
+              mensagem: `${produtosDesativadosComEstoquePositivo} produto(s) com ESTQ maior que zero mantiveram código DESATIVADO e receberam observação na exportação`,
+              tipo: 'warning'
+            }]);
+          }
         }
       };
       
@@ -995,17 +1046,21 @@ function App() {
     const codigosExportados = new Set();
     const dadosNormalizados = ehProduto
       ? dadosProcessadosRef.current.map(registro => {
-          const fabricante = resolverCodigoFabricante(
-            registro['Cod Fabricante'],
-            registro['Descrição'],
-            fabricantesRef.current
-          );
+          const fabricante = registro.__observacaoFabricante
+            ? { codigo: registro['Cod Fabricante'] }
+            : resolverCodigoFabricante(
+                registro['Cod Fabricante'],
+                registro['Descrição'],
+                fabricantesRef.current
+              );
           return ajustarProdutoAoModelo({
             ...registro,
-            'Cod Linha': resolverCodigoLinha(
-              registro['Cod Linha'],
-              linhasRef.current
-            ).codigo,
+            'Cod Linha': registro.__observacaoLinha
+              ? registro['Cod Linha']
+              : resolverCodigoLinha(
+                  registro['Cod Linha'],
+                  linhasRef.current
+                ).codigo,
             'Cod Fabricante': fabricante.codigo
           });
         })
@@ -1045,7 +1100,7 @@ function App() {
     const nomeModelo = ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES';
     try {
       const wbModelo = await criarWorkbookModelo(nomeModelo, dadosParaExportar, camposDestino);
-      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_IMPORT_${timestamp}.xls`, { bookType: 'biff8' });
+      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_IMPORT_${timestamp}.xlsx`, { bookType: 'xlsx' });
     } catch (error) {
       console.error(`Erro ao gerar planilha de ${nomeCadastro}s:`, error);
       alert(`Não foi possível gerar a planilha de ${nomeCadastro}s com o modelo de cabeçalhos.`);
@@ -1061,15 +1116,19 @@ function App() {
       .map(registro => ehProduto
         ? ajustarProdutoAoModelo({
             ...registro,
-            'Cod Linha': resolverCodigoLinha(
-              registro['Cod Linha'],
-              linhasRef.current
-            ).codigo,
-            'Cod Fabricante': resolverCodigoFabricante(
-              registro['Cod Fabricante'],
-              registro['Descrição'],
-              fabricantesRef.current
-            ).codigo
+            'Cod Linha': registro.__observacaoLinha
+              ? registro['Cod Linha']
+              : resolverCodigoLinha(
+                  registro['Cod Linha'],
+                  linhasRef.current
+                ).codigo,
+            'Cod Fabricante': registro.__observacaoFabricante
+              ? registro['Cod Fabricante']
+              : resolverCodigoFabricante(
+                  registro['Cod Fabricante'],
+                  registro['Descrição'],
+                  fabricantesRef.current
+                ).codigo
           })
         : {
             ...ajustarCadastroAoModelo(registro),
@@ -1105,7 +1164,7 @@ function App() {
     const nomeModelo = ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES';
     try {
       const wbModelo = await criarWorkbookModelo(nomeModelo, dadosAlterados, camposDestino);
-      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_SOMENTE_ALTERADOS_${timestamp}.xls`, { bookType: 'biff8' });
+      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_SOMENTE_ALTERADOS_${timestamp}.xlsx`, { bookType: 'xlsx' });
     } catch (error) {
       console.error(`Erro ao gerar planilha de ${nomeCadastro}s alterados:`, error);
       alert(`Não foi possível gerar a planilha de ${nomeCadastro}s com o modelo de cabeçalhos.`);
