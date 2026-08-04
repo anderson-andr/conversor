@@ -425,6 +425,38 @@ header p {
   flex-wrap: wrap;
 }
 
+.export-format-selector {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 20px;
+}
+
+.export-format-selector label {
+  font-weight: 600;
+  color: var(--md-on-surface);
+}
+
+.export-format-selector select {
+  width: min(100%, 420px);
+  padding: 10px 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 8px;
+  background: var(--md-surface-container-lowest);
+  color: var(--md-on-surface);
+  font: inherit;
+}
+
+.export-format-selector select:focus {
+  border-color: var(--md-primary);
+  outline: 2px solid color-mix(in srgb, var(--md-primary) 20%, transparent);
+}
+
+.export-format-selector small {
+  color: var(--md-error);
+}
+
 .btn {
   padding: 12px 24px;
   border: none;

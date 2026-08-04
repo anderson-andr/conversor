@@ -125,6 +125,12 @@ function limparAspasRegistro(registro) {
   );
 }
 
+function obterConfigExportacao(formato) {
+  return formato === 'xls'
+    ? { extensao: 'xls', bookType: 'biff8' }
+    : { extensao: 'xlsx', bookType: 'xlsx' };
+}
+
 function encontrarCodigoDesativado(porDescricao) {
   const entrada = [...porDescricao.entries()]
     .find(([descricao, codigos]) => descricao.startsWith('DESATIVAD') && codigos.length > 0);
@@ -255,6 +261,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('clientes');
   const [searchTerm, setSearchTerm] = useState('');
   const [processando, setProcessando] = useState(false);
+  const [formatoExportacao, setFormatoExportacao] = useState('xlsx');
   const fileInputRef = useRef(null);
   const fabricantesInputRef = useRef(null);
   const linhasInputRef = useRef(null);
@@ -1100,12 +1107,13 @@ function App() {
     const nomeModelo = ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES';
     try {
       const wbModelo = await criarWorkbookModelo(nomeModelo, dadosParaExportar, camposDestino);
-      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_IMPORT_${timestamp}.xlsx`, { bookType: 'xlsx' });
+      const { extensao, bookType } = obterConfigExportacao(formatoExportacao);
+      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_IMPORT_${timestamp}.${extensao}`, { bookType });
     } catch (error) {
       console.error(`Erro ao gerar planilha de ${nomeCadastro}s:`, error);
       alert(`Não foi possível gerar a planilha de ${nomeCadastro}s com o modelo de cabeçalhos.`);
     }
-  }, [campoCodigo, camposDestino, ehFornecedor, ehProduto, nomeCadastro]);
+  }, [campoCodigo, camposDestino, ehFornecedor, ehProduto, formatoExportacao, nomeCadastro]);
 
   const exportarApenasAlteracoes = useCallback(async () => {
     const indicesAlterados = [...new Set(alteracoesDetalhadas.map(a => a.idx))];
@@ -1164,12 +1172,13 @@ function App() {
     const nomeModelo = ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES';
     try {
       const wbModelo = await criarWorkbookModelo(nomeModelo, dadosAlterados, camposDestino);
-      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_SOMENTE_ALTERADOS_${timestamp}.xlsx`, { bookType: 'xlsx' });
+      const { extensao, bookType } = obterConfigExportacao(formatoExportacao);
+      XLSXStyle.writeFile(wbModelo, `${nomeModelo}_SOMENTE_ALTERADOS_${timestamp}.${extensao}`, { bookType });
     } catch (error) {
       console.error(`Erro ao gerar planilha de ${nomeCadastro}s alterados:`, error);
       alert(`Não foi possível gerar a planilha de ${nomeCadastro}s com o modelo de cabeçalhos.`);
     }
-  }, [alteracoesDetalhadas, campoCodigo, camposDestino, ehFornecedor, ehProduto, nomeCadastro]);
+  }, [alteracoesDetalhadas, campoCodigo, camposDestino, ehFornecedor, ehProduto, formatoExportacao, nomeCadastro]);
 
   const exportarDuplicados = useCallback(() => {
     if (duplicadosRef.current.length === 0) return;
@@ -1179,8 +1188,9 @@ function App() {
     XLSX.utils.book_append_sheet(wb, ws, 'Duplicados');
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    XLSX.writeFile(wb, `${ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES'}_DUPLICADOS_${timestamp}.xls`, { bookType: 'biff8' });
-  }, [ehFornecedor, ehProduto]);
+    const { extensao, bookType } = obterConfigExportacao(formatoExportacao);
+    XLSX.writeFile(wb, `${ehProduto ? 'PRODUTOS' : ehFornecedor ? 'FORNECEDORES' : 'CLIENTES'}_DUPLICADOS_${timestamp}.${extensao}`, { bookType });
+  }, [ehFornecedor, ehProduto, formatoExportacao]);
 
   const descartarAlteracoes = useCallback(() => {
     if (window.confirm('Deseja realmente descartar todas as alterações feitas?')) {
@@ -1648,6 +1658,20 @@ function App() {
                 <div className="label">Linhas Alteradas</div>
                 <div className="value">{estatisticas.linhasAlteradas}</div>
               </div>
+            </div>
+            <div className="export-format-selector">
+              <label htmlFor="formatoExportacao">Formato da exportação</label>
+              <select
+                id="formatoExportacao"
+                value={formatoExportacao}
+                onChange={evento => setFormatoExportacao(evento.target.value)}
+              >
+                <option value="xlsx">.xlsx — mantém comentários e cores</option>
+                <option value="xls">.xls — compatibilidade com sistemas antigos</option>
+              </select>
+              {formatoExportacao === 'xls' && (
+                <small>O formato .xls não preserva os comentários e as cores dos campos obrigatórios.</small>
+              )}
             </div>
             <div className="actions">
               <button className="btn btn-success" onClick={exportarExcel}>📥 Exportar Excel</button>
