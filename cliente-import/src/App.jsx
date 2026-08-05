@@ -713,7 +713,10 @@ function App() {
             'Nome Fantasia': normalizarTexto(row['Nome Fantasia']) || configPadrao['Nome Fantasia'] || '',
             'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']) || configPadrao['Tipo de Pessoa'] || 'F',
             'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF'], mapearTipoPessoa(row['Tipo de Pessoa'])),
-            'Tipo de Inscrição': row['Tipo de Inscrição'] || configPadrao['Tipo de Inscrição'] || mapearTipoInscricao(row),
+            'Tipo de Inscrição': mapearTipoInscricao(
+              row['Tipo de Inscrição'] || configPadrao['Tipo de Inscrição'],
+              row['Inscrição']
+            ),
             'Inscrição': row['Inscrição'] || '',
             'Segmento': row['Segmento'] || configPadrao['Segmento'] || 'CL',
             'Cód Grupo de Cliente': row['Cód Grupo de Cliente'] || configPadrao['Cód Grupo de Cliente'] || '',
@@ -763,7 +766,10 @@ function App() {
               'Nome Fantasia': normalizarTexto(row['Nome Fantasia']),
               'Tipo de Pessoa': mapearTipoPessoa(row['Tipo de Pessoa']) || configPadrao['Tipo de Pessoa'] || '',
               'CNPJ/CPF': limparCnpjCpf(row['CNPJ/CPF'], mapearTipoPessoa(row['Tipo de Pessoa'])),
-              'Tipo de Inscrição': row['Tipo de Inscrição'] || configPadrao['Tipo de Inscrição'] || mapearTipoInscricao(row),
+              'Tipo de Inscrição': mapearTipoInscricao(
+                row['Tipo de Inscrição'] || configPadrao['Tipo de Inscrição'],
+                row['Inscrição']
+              ),
               'Inscrição': row['Inscrição'] || '',
               'Conta Contábil': row['Conta Contábil'] || configPadrao['Conta Contábil'] || '',
               'Data de Cadastro': parseData(row['Data de Cadastro'] || configPadrao['Data de Cadastro']),

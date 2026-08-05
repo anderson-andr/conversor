@@ -137,11 +137,28 @@ export function mapearTipoPessoa(v) {
     return '';
 }
 
-export function mapearTipoInscricao(row) {
-    const ie = String(row['Inscrição'] || '').trim();
-    const ieUpper = ie.toUpperCase();
-    if (!ie || ieUpper === 'ISENTO' || ieUpper === 'I') return 'I';
-    return 'E';
+export function mapearTipoInscricao(tipoOuRow, inscricao = '') {
+    const row = tipoOuRow && typeof tipoOuRow === 'object' ? tipoOuRow : null;
+    const tipo = String(row ? row['Tipo de Inscrição'] || '' : tipoOuRow || '')
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase();
+    const numeroInscricao = String(row ? row['Inscrição'] || '' : inscricao || '').trim();
+
+    if (tipo === 'M' || tipo.includes('MUNICIPAL')) return 'M';
+    if (
+        tipo === 'I' ||
+        tipo.includes('ISENTO') ||
+        tipo.includes('NAO CONTRIBUINTE')
+    ) return 'I';
+    if (
+        tipo === 'E' ||
+        tipo.includes('ESTADUAL') ||
+        tipo.includes('CONTRIBUINTE')
+    ) return 'E';
+
+    return numeroInscricao ? 'E' : 'I';
 }
 
 export function parseData(v) {
